@@ -14,6 +14,27 @@
 - 资源目录、报告目录
 首次使用时先读取该 config 确认项目绑定是否完成。如果不存在，按 `templates/config.example.cjs` 创建。
 
+### 首次绑定流程
+
+安装后 config 中的 `getLocales()` 和 `getSpriteFrameMap()` 默认返回空对象，必须补全才能正常工作。按以下步骤自动完成绑定：
+
+1. **扫描项目，定位 i18n 数据源**：搜索项目中的 locale/i18n 相关文件，常见模式包括：
+   - JSON 文件：`locales/*.json`、`i18n/*.json`、`lang/*.json`
+   - JS/TS 模块：包含 `locales`、`i18n`、`messages`、`translations` 等导出的文件
+   - 框架约定：`src/locales/`、`assets/_script/I18nManager.*`、`public/locales/`
+   - 配置文件中的内联定义
+
+2. **补全 `getLocales()`**：根据找到的数据源，在 config 中实现读取逻辑。例如：
+   - JSON 文件：`return { zh: JSON.parse(fs.readFileSync('locales/zh.json', 'utf8')), ... }`
+   - JS/TS 源码：用 `fs.readFileSync` + 正则解析提取 locale 对象
+   - 注意：不要 `require()` 业务代码，用 `fs.readFileSync` 读源文件再解析
+
+3. **补全 `getSpriteFrameMap()`**：如果项目有图片本地化映射（如 Cocos spriteFrameMap、Unity sprite atlas 映射），用同样方式读取并返回。如果项目没有图片本地化需求，保持返回 `{}` 即可。
+
+4. **校验**：补全后运行 `node skills/i18n-workflow/tools/audit-i18n-assets.cjs --config=tools/i18n-workflow.config.cjs`，确认输出中 `spriteFrameMapEntries` 和 locale 数据非零（如果项目确实有 i18n 数据的话）。
+
+5. **调整路径**：确认 `assetsRoot`、`resourcesRoot`、`reportDirectory` 等路径与当前项目结构匹配。
+
 ## 可用工具
 
 以下工具全部在本 skill 包的 `tools/` 目录中，路径相对于项目根目录为 `skills/i18n-workflow/tools/`。
