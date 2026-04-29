@@ -58,7 +58,12 @@
 
 ### 端到端编排
 ```bash
-node skills/i18n-workflow/tools/run-i18n-workflow.cjs --config=tools/i18n-workflow.config.cjs --steps=audit,generate,jobs,review --dry-run
+node skills/i18n-workflow/tools/run-i18n-workflow.cjs --config=tools/i18n-workflow.config.cjs --steps=extract,audit,generate,jobs,review --dry-run
+```
+
+### 硬编码文本提取
+```bash
+node skills/i18n-workflow/tools/extract-hardcoded-text.cjs --config=tools/i18n-workflow.config.cjs
 ```
 
 ### 资源审计

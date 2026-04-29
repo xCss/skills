@@ -15,7 +15,7 @@ function stepsArg() {
   for (const arg of process.argv.slice(2)) {
     if (arg.startsWith('--steps=')) return arg.slice('--steps='.length).split(',');
   }
-  return ['audit', 'generate', 'quality', 'compare', 'jobs', 'review'];
+  return ['extract', 'audit', 'generate', 'quality', 'compare', 'jobs', 'review'];
 }
 
 const steps = new Set(stepsArg());
@@ -46,6 +46,10 @@ function run(label, cmd) {
 
 console.log(`i18n workflow: languages=${languages.join(',')}, baseline=${config.baselineLanguage}, fallback=${config.fallbackChain.join(',')}`);
 if (dryRun) console.log('(dry-run mode)');
+
+if (steps.has('extract')) {
+  run('Hardcoded Text Extraction', `node ${skillTool('extract-hardcoded-text.cjs')} ${configFlag}`);
+}
 
 if (steps.has('audit')) {
   run('Resource Audit', `node ${skillTool('audit-i18n-assets.cjs')} ${configFlag}`);

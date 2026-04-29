@@ -71,6 +71,9 @@ function parseArgs(argv) {
     else if (arg.startsWith('--apply-translations=')) args.applyTranslations = arg.slice('--apply-translations='.length);
     else if (arg.startsWith('--write-template=')) args.writeTemplate = arg.slice('--write-template='.length);
     else if (arg.startsWith('--concurrency=')) args.concurrency = Math.min(10, Math.max(1, Number(arg.slice('--concurrency='.length)) || 1));
+    else if (arg.startsWith('--config=')) args.config = arg.slice('--config='.length);
+    else if (arg.startsWith('--languages=')) args.languages = arg.slice('--languages='.length).split(',').map(s => s.trim()).filter(Boolean);
+    else if (arg === '--dry-run') args.dryRun = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
   return args;

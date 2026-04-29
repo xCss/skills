@@ -14,6 +14,7 @@ const outputDir = config.reportDirectory;
 const outputPath = path.join(outputDir, 'i18n-asset-audit.json');
 
 const targetLanguages = deriveTargetLanguages(config);
+const resourcesRelPrefix = `${toPosix(path.relative(projectRoot, resourcesRoot))}/`;
 const builtinSpriteFrameUuids = new Set([
   'a23235d1-15db-4b95-8439-a2e005bfff91',
 ]);
@@ -144,19 +145,21 @@ function loadSpriteFrameIndex() {
     const atlasSize = meta.size || {};
     for (const [name, subMeta] of Object.entries(meta.subMetas)) {
       if (!subMeta || !subMeta.uuid) continue;
-      index.set(subMeta.uuid, {
+      const record = {
         uuid: subMeta.uuid,
         textureUuid: meta.uuid,
         name,
         imagePath: imageRel,
         metaPath: rel(metaPath),
-        resourcesPath: imageRel.startsWith('assets/resources/')
-          ? imageRel.slice('assets/resources/'.length).replace(/\.(png|jpg|jpeg|webp)$/i, '')
+        resourcesPath: imageRel.startsWith(resourcesRelPrefix)
+          ? imageRel.slice(resourcesRelPrefix.length).replace(/\.(png|jpg|jpeg|webp)$/i, '')
           : null,
         width: subMeta.rawWidth || subMeta.width || meta.width || atlasSize.width || null,
         height: subMeta.rawHeight || subMeta.height || meta.height || atlasSize.height || null,
         fileSize: fs.existsSync(imagePath) ? fs.statSync(imagePath).size : null,
-      });
+      };
+      index.set(subMeta.uuid, record);
+      index.set(`${meta.uuid}@${name}`, record);
     }
   }
   return index;
