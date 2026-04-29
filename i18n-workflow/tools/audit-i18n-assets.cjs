@@ -336,11 +336,22 @@ function buildI18nIssues(spriteFrameMap, spriteFrameIndex, usedSpriteUuids) {
   return { mappedMissing, missingMapCandidates, mappedUnused };
 }
 
+function resolveRoot(root) {
+  return path.isAbsolute(root) ? root : path.join(projectRoot, root);
+}
+
+function configuredRoots(values, fallback) {
+  const roots = Array.isArray(values) && values.length ? values : fallback;
+  return roots.map(resolveRoot);
+}
+
 function main() {
   const spriteFrameIndex = loadSpriteFrameIndex();
   const spriteFrameMap = parseSpriteFrameMap();
-  const prefabFiles = walk(path.join(resourcesRoot, 'perfabs'), filePath => filePath.endsWith('.prefab'));
-  const sceneFiles = walk(path.join(assetsRoot, 'Scene'), filePath => filePath.endsWith('.fire'));
+  const prefabRoots = configuredRoots(config.prefabRoots, [path.join(resourcesRoot, 'perfabs'), path.join(resourcesRoot, 'prefabs')]);
+  const sceneRoots = configuredRoots(config.sceneRoots, [path.join(assetsRoot, 'Scene')]);
+  const prefabFiles = prefabRoots.flatMap(root => walk(root, filePath => filePath.endsWith('.prefab')));
+  const sceneFiles = sceneRoots.flatMap(root => walk(root, filePath => filePath.endsWith('.fire')));
   const scannedFiles = [...prefabFiles, ...sceneFiles];
 
   const sprites = [];
