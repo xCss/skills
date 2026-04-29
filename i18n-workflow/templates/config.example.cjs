@@ -13,12 +13,13 @@ const projectRoot = path.resolve(__dirname, '..'); // adjust to your project roo
 
 module.exports = {
   // --- Language ---
-  // zh 通常是基准/源语言，大概率已有完整资源（甚至可能是唯一语言，尚未做 i18n）。
-  // 按需增删语言。
-  supportedLanguages: ['zh', 'en', 'ar', 'vi'],
+  // 只声明当前工作区实际存在并会随包发布的语言。
+  // 新项目通常只有源语言；不要因为 Git 历史、已删除文件、旧分支或需求设想而预填 en/ar/vi。
+  // 新增语言时，再把目标语言加入这里并补齐 runtime、locale、图片资源。
+  supportedLanguages: ['zh'],
   baselineLanguage: 'zh',
-  // 资源缺失时的回退顺序：先尝试 zh（主兜底），再 en（次兜底）。
-  fallbackChain: ['zh', 'en'],
+  // 资源缺失时的回退顺序。只有 zh 时保持 zh-only。
+  fallbackChain: ['zh'],
 
   // --- Runtime ---
   // 描述运行时如何检测用户语言。仅用于文档/审计参考，不影响工具执行。
@@ -33,6 +34,7 @@ module.exports = {
   // --- Locale ---
   // Return { [lang]: { [key]: translatedString } }
   // 数据来源不限：可以读 JSON 文件、YAML、TS/JS 源码正则解析、数据库、远端 API 等。
+  // 读取当前工作区真实存在的文件；不要从 git show HEAD / git ls-files / 已删除文件推断当前语言。
   getLocales() {
     // Example: return JSON.parse(fs.readFileSync('src/locales/zh.json', 'utf8'));
     return {};

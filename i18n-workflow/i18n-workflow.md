@@ -14,6 +14,15 @@
 - 资源目录、报告目录
 首次使用时先读取该 config 确认项目绑定是否完成。如果不存在，按 `templates/config.example.cjs` 创建。
 
+### 当前工作区边界
+
+审计默认只描述**当前工作区真实存在的文件**：
+
+- `supportedLanguages` 只能包含当前工作区实际有 runtime/locale/资源支持、并准备随包发布的语言。
+- 不要因为 `git ls-files`、`git status` 中的删除项、`git show HEAD:<path>`、旧分支、旧提交或历史 i18n 实验而把语言加入当前审计。
+- 如果当前工作区没有 `en/ar/vi` runtime、locale 或资源，配置应保持 `supportedLanguages: ['zh']` 和 `fallbackChain: ['zh']`。
+- 只有用户明确要求“对比历史 i18n”“检查被删除的多语言资源”“恢复旧 i18n”时，才可以读取 Git 历史；这种结果必须标注为历史/回归审计，不得混入当前工作区审计结论。
+
 ### 首次绑定流程
 
 安装后 config 中的 `getLocales()` 和 `getSpriteFrameMap()` 默认返回空对象，必须补全才能正常工作。
@@ -22,7 +31,7 @@
 
 #### 阶段 A：项目已有 i18n 基础设施
 
-如果项目中已存在 locale/i18n 文件（如 `locales/*.json`、`i18n/*.json`、`src/locales/`、或代码中有 i18n 管理模块），则：
+如果当前工作区中已存在 locale/i18n 文件（如 `locales/*.json`、`i18n/*.json`、`src/locales/`、或代码中有 i18n 管理模块），则：
 
 1. 定位这些文件，在 config 的 `getLocales()` 中实现读取逻辑。
 2. 如果有图片本地化映射，在 `getSpriteFrameMap()` 中实现读取逻辑。
@@ -49,6 +58,7 @@
 #### 通用注意事项
 
 - config 中不要 `require()` 业务代码，用 `fs.readFileSync` 读源文件再解析。
+- config 只读取当前工作区文件系统中存在的文件；不要用 Git 历史或已删除文件补全 `getLocales()` / `getSpriteFrameMap()`。
 - 如果项目没有图片本地化需求，`getSpriteFrameMap()` 保持返回 `{}` 即可。
 - 确认 `assetsRoot`、`resourcesRoot`、`reportDirectory` 等路径与当前项目结构匹配。
 
@@ -96,10 +106,11 @@ uv run --with pillow python skills/i18n-workflow/tools/image-ops.py compare --so
 
 1. 先读本目录下 `README.md` 确认流程，再动手。
 2. 先读项目 config 确认当前语言配置。
-3. 运行时语言由浏览器环境自动检测，不固定为 zh；缺失时按 fallback chain 回退。
-4. 不要硬编码语言列表，从 config 读取。
-5. 审计报告在 config 声明的 `reportDirectory` 中，每次运行自动覆盖。
-6. 新增语言时按 `checklists.md` 中的 checklist 逐项检查。
+3. 当前工作区没有多语言基础设施时，保持 zh-only 审计；不要从历史文件推断 en/ar/vi。
+4. 运行时语言由项目当前 runtime 决定；缺失时按当前 config 的 fallback chain 回退。
+5. 不要硬编码语言列表，从 config 读取。
+6. 审计报告在 config 声明的 `reportDirectory` 中，每次运行自动覆盖。
+7. 新增语言时按 `checklists.md` 中的 checklist 逐项检查。
 
 ## 自动化模式
 

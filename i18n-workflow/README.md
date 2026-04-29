@@ -12,6 +12,10 @@ git clone git@github.com:xCss/skills.git /tmp/_skills_repo && mkdir -p skills &&
 
 After installation, edit `tools/i18n-workflow.config.cjs` to match your project structure, then tell your agent to read `skills/i18n-workflow/README.md` for the full workflow.
 
+## Current Worktree Boundary
+
+Audits describe the current working tree by default. Do not add languages or sprite mappings from Git history, deleted files, old branches, or `git show HEAD:<path>` unless the user explicitly asks for a history/regression audit. If the current project only ships the source language, keep `supportedLanguages` and `fallbackChain` source-language-only until a new language is actually added.
+
 ## Scope
 
 This playbook covers:
