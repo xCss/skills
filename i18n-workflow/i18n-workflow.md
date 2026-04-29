@@ -12,27 +12,19 @@
 - 支持的语言、基准语言、fallback chain
 - locale / spriteFrame 数据如何读取
 - 资源目录、报告目录
+- 项目专有脚本路径（如 `auditScript`、`generateScript`）
 
 首次使用时先读取该 config 确认项目绑定是否完成。如果不存在，按 `templates/config.example.cjs` 创建。
 
 ## 可用工具
 
-工具脚本在本目录 `tools/` 中，项目可能有 wrapper 在 `tools/i18n/` 中（仅一行 require 委托到这里）。
-
-### 资源审计
-```bash
-node tools/audit-i18n-assets.cjs --config=tools/i18n-workflow.config.cjs
-```
+以下工具全部在本 skill 包的 `tools/` 目录中，路径相对于项目根目录为 `skills/i18n-workflow/tools/`。
 
 ### 端到端编排
 ```bash
 node skills/i18n-workflow/tools/run-i18n-workflow.cjs --config=tools/i18n-workflow.config.cjs --steps=audit,generate,jobs,review --dry-run
 ```
-
-### 图片生成（需要 API key）
-```bash
-node tools/generate-i18n-images.cjs --config=tools/i18n-workflow.config.cjs --generate --execute
-```
+编排器会根据 config 中的 `auditScript` / `generateScript` 字段调用项目专有的审计和生成脚本。如果项目没有这些脚本，对应步骤会跳过并报错。
 
 ### 重生成任务提取
 ```bash
@@ -49,6 +41,14 @@ node skills/i18n-workflow/tools/build-i18n-review-sheets.cjs --config=tools/i18n
 uv run --with pillow python skills/i18n-workflow/tools/image-ops.py inspect --path <图片路径>
 uv run --with pillow python skills/i18n-workflow/tools/image-ops.py compare --source <源图> --target <目标图>
 ```
+
+### 项目专有脚本
+
+审计脚本和图片生成脚本属于项目专有实现，不在本 skill 包中。它们的路径由 config 声明：
+- `config.auditScript` — 资源审计脚本（默认 `tools/audit-i18n-assets.cjs`）
+- `config.generateScript` — 图片生成脚本（默认 `tools/generate-i18n-images.cjs`）
+
+如果项目尚未实现这些脚本，agent 应根据 `README.md` 和 `contracts.md` 中的契约为项目创建。
 
 ## 执行原则
 
