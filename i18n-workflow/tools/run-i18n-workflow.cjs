@@ -47,18 +47,13 @@ function run(label, cmd) {
 console.log(`i18n workflow: languages=${languages.join(',')}, baseline=${config.baselineLanguage}, fallback=${config.fallbackChain.join(',')}`);
 if (dryRun) console.log('(dry-run mode)');
 
-// Audit and generate are project-specific scripts; the config declares their location.
-// If the project has them at the conventional paths, use those; otherwise skip.
-const auditScript = config.auditScript || 'tools/audit-i18n-assets.cjs';
-const generateScript = config.generateScript || 'tools/generate-i18n-images.cjs';
-
 if (steps.has('audit')) {
-  run('Resource Audit', `node ${projectTool(auditScript)} ${configFlag}`);
+  run('Resource Audit', `node ${skillTool('audit-i18n-assets.cjs')} ${configFlag}`);
 }
 
 if (steps.has('generate')) {
   const extra = dryRun ? '' : ' --generate --execute';
-  run('Image Generation', `node ${projectTool(generateScript)} ${configFlag}${extra}`);
+  run('Image Generation', `node ${skillTool('generate-i18n-images.cjs')} ${configFlag}${extra}`);
 }
 
 if (steps.has('jobs')) {
