@@ -16,24 +16,41 @@
 
 ### 首次绑定流程
 
-安装后 config 中的 `getLocales()` 和 `getSpriteFrameMap()` 默认返回空对象，必须补全才能正常工作。按以下步骤自动完成绑定：
+安装后 config 中的 `getLocales()` 和 `getSpriteFrameMap()` 默认返回空对象，必须补全才能正常工作。
 
-1. **扫描项目，定位 i18n 数据源**：搜索项目中的 locale/i18n 相关文件，常见模式包括：
-   - JSON 文件：`locales/*.json`、`i18n/*.json`、`lang/*.json`
-   - JS/TS 模块：包含 `locales`、`i18n`、`messages`、`translations` 等导出的文件
-   - 框架约定：`src/locales/`、`assets/_script/I18nManager.*`、`public/locales/`
-   - 配置文件中的内联定义
+先判断项目当前处于哪个阶段，再按对应路径执行：
 
-2. **补全 `getLocales()`**：根据找到的数据源，在 config 中实现读取逻辑。例如：
-   - JSON 文件：`return { zh: JSON.parse(fs.readFileSync('locales/zh.json', 'utf8')), ... }`
-   - JS/TS 源码：用 `fs.readFileSync` + 正则解析提取 locale 对象
-   - 注意：不要 `require()` 业务代码，用 `fs.readFileSync` 读源文件再解析
+#### 阶段 A：项目已有 i18n 基础设施
 
-3. **补全 `getSpriteFrameMap()`**：如果项目有图片本地化映射（如 Cocos spriteFrameMap、Unity sprite atlas 映射），用同样方式读取并返回。如果项目没有图片本地化需求，保持返回 `{}` 即可。
+如果项目中已存在 locale/i18n 文件（如 `locales/*.json`、`i18n/*.json`、`src/locales/`、或代码中有 i18n 管理模块），则：
 
-4. **校验**：补全后运行 `node skills/i18n-workflow/tools/audit-i18n-assets.cjs --config=tools/i18n-workflow.config.cjs`，确认输出中 `spriteFrameMapEntries` 和 locale 数据非零（如果项目确实有 i18n 数据的话）。
+1. 定位这些文件，在 config 的 `getLocales()` 中实现读取逻辑。
+2. 如果有图片本地化映射，在 `getSpriteFrameMap()` 中实现读取逻辑。
+3. 跑一次审计校验绑定是否成功。
 
-5. **调整路径**：确认 `assetsRoot`、`resourcesRoot`、`reportDirectory` 等路径与当前项目结构匹配。
+#### 阶段 B：项目尚无 i18n（常见初始状态）
+
+大多数项目初始没有任何 i18n 文件，文本直接硬编码在代码中（中文或英文）。此时需要从零建立 i18n 基础设施：
+
+1. **识别源语言**：扫描代码中的硬编码字符串，判断项目主语言（通常是中文或英文）。
+2. **提取文本**：从 UI 代码（模板/组件/场景文件）中提取所有面向用户的硬编码文本字符串，忽略日志、变量名、技术常量。
+3. **创建 locale 文件**：
+   - 创建 `locales/` 目录（或项目约定的位置）。
+   - 将提取的文本写入源语言文件（如 `locales/zh.json`），key 按功能模块分组命名。
+   - 为目标语言创建对应文件（如 `locales/en.json`），value 留空或翻译。
+4. **创建 i18n runtime**：根据项目框架，创建或引入 i18n 运行时模块，实现：
+   - 浏览器语言检测。
+   - 文本 key 查找与 fallback chain。
+   - 语言切换接口。
+5. **替换硬编码**：将代码中的硬编码字符串替换为 i18n key 调用（如 `t('common.accept')`）。
+6. **补全 config**：在 `getLocales()` 中读取刚创建的 locale 文件。
+7. **校验**：跑一次审计确认 locale 覆盖率。
+
+#### 通用注意事项
+
+- config 中不要 `require()` 业务代码，用 `fs.readFileSync` 读源文件再解析。
+- 如果项目没有图片本地化需求，`getSpriteFrameMap()` 保持返回 `{}` 即可。
+- 确认 `assetsRoot`、`resourcesRoot`、`reportDirectory` 等路径与当前项目结构匹配。
 
 ## 可用工具
 
