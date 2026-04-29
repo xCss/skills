@@ -28,13 +28,7 @@ function keyFromText(file, text, index) {
     .replace(/[^a-zA-Z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '')
     .toLowerCase() || 'text';
-  const short = String(text)
-    .trim()
-    .replace(/[\s　]+/g, '_')
-    .replace(/[^\p{L}\p{N}_]+/gu, '')
-    .slice(0, 24)
-    .toLowerCase();
-  return `${base}.${short || `text_${index}`}`;
+  return `${base}.text_${index}`;
 }
 
 function extractFromCocosPrefab(filePath) {
