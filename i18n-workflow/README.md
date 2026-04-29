@@ -96,6 +96,8 @@ For each target language needing a localized text image:
 - Preserve background, transparency, button/ribbon style.
 - Replace embedded text with the translated string.
 
+Model-backed classification and generation use `BASE_URL` and `API_KEY`. Requests run with concurrency 10 by default and can be capped with `--concurrency=<1-10>`.
+
 ### 4. Quality Audit
 
 Validate generated images against the manifest:

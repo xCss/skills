@@ -59,7 +59,7 @@ function parseArgs(argv) {
     limit: Infinity,
     only: null,
     applyTranslations: null,
-    concurrency: 1,
+    concurrency: 10,
   };
   for (const arg of argv) {
     if (arg === '--classify') args.classify = true;
@@ -70,7 +70,7 @@ function parseArgs(argv) {
     else if (arg.startsWith('--only=')) args.only = arg.slice('--only='.length);
     else if (arg.startsWith('--apply-translations=')) args.applyTranslations = arg.slice('--apply-translations='.length);
     else if (arg.startsWith('--write-template=')) args.writeTemplate = arg.slice('--write-template='.length);
-    else if (arg.startsWith('--concurrency=')) args.concurrency = Math.min(10, Math.max(1, Number(arg.slice('--concurrency='.length)) || 1));
+    else if (arg.startsWith('--concurrency=')) args.concurrency = Math.min(10, Math.max(1, Number(arg.slice('--concurrency='.length)) || 10));
     else if (arg.startsWith('--config=')) args.config = arg.slice('--config='.length);
     else if (arg.startsWith('--languages=')) args.languages = arg.slice('--languages='.length).split(',').map(s => s.trim()).filter(Boolean);
     else if (arg === '--dry-run') args.dryRun = true;
@@ -152,7 +152,7 @@ function buildManifestFromAudit() {
     modelPlan: {
       classifier: process.env.I18N_CLASSIFY_MODEL || 'gpt-5.5',
       imageGenerator: process.env.I18N_IMAGE_MODEL || 'gpt-image-2',
-      api: 'OpenAI Responses API via ANTHROPIC_BASE_URL/ANTHROPIC_API_KEY',
+      api: 'OpenAI Responses API via BASE_URL/API_KEY',
       instructions: [
         'Classify whether the source image contains embedded text that needs localization.',
         'Preserve original canvas width and height exactly for generated assets.',
@@ -187,15 +187,31 @@ function saveManifest(manifest) {
   writeJson(manifestPath, manifest);
 }
 
+function concurrencyLimit(args) {
+  return Math.min(10, Math.max(1, Number(args.concurrency) || 10));
+}
+
+async function runConcurrentJobs(items, args, runJob) {
+  let nextIndex = 0;
+  const concurrency = concurrencyLimit(args);
+  async function worker() {
+    while (nextIndex < items.length) {
+      const item = items[nextIndex++];
+      await runJob(item);
+    }
+  }
+  await Promise.all(Array.from({ length: concurrency }, worker));
+}
+
 function getResponsesEndpoint() {
-  const baseUrl = process.env.ANTHROPIC_BASE_URL;
-  if (!baseUrl) throw new Error('ANTHROPIC_BASE_URL is required for --execute.');
+  const baseUrl = process.env.BASE_URL;
+  if (!baseUrl) throw new Error('BASE_URL is required for --execute.');
   return `${baseUrl.replace(/\/+$/, '')}/responses`;
 }
 
 function getApiKey() {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error('ANTHROPIC_API_KEY is required for --execute.');
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) throw new Error('API_KEY is required for --execute.');
   return apiKey;
 }
 
@@ -380,11 +396,28 @@ function createCocosTextureMeta(imagePath, width, height) {
   return { metaPath, spriteUuid };
 }
 
+function localizedTextTemplate() {
+  return Object.fromEntries(targetLanguages.map(language => [language, 'string|null']));
+}
+
+function emptyLocalizedText() {
+  return Object.fromEntries(targetLanguages.map(language => [language, null]));
+}
+
 async function classifyWithModel(candidate) {
+  const responseShape = {
+    hasText: 'boolean',
+    embeddedText: 'string|null',
+    semanticMeaning: 'string',
+    localizedText: localizedTextTemplate(),
+    confidence: '0-1',
+    reason: 'string',
+  };
   const prompt = [
     'You are auditing a Cocos Creator UI image for game localization.',
     'Return only JSON with this shape:',
-    '{"hasText":boolean,"embeddedText":"string|null","semanticMeaning":"string","localizedText":{"en":"string|null","ar":"string|null"},"confidence":0-1,"reason":"string"}',
+    JSON.stringify(responseShape),
+    `localizedText must include exactly these target language keys: ${targetLanguages.join(', ') || '(none)'}.`,
     'If the image is decorative or an icon without text, hasText must be false and localizedText values must be null.',
     'Keep localized UI copy concise enough to fit the same canvas.',
     `Source path: ${candidate.sourceImagePath}`,
@@ -496,7 +529,7 @@ function buildTranslationTemplate(manifest) {
       hasText: true,
       embeddedText: null,
       semanticMeaning: null,
-      localizedText: { en: null, ar: null },
+      localizedText: emptyLocalizedText(),
     };
   }
   return template;
@@ -526,12 +559,12 @@ async function runClassify(args) {
     .slice(0, args.limit);
 
   if (!args.execute) {
-    console.log(`Dry run: ${candidates.length} candidates would be sent to ${process.env.I18N_CLASSIFY_MODEL || 'gpt-5.5'} via Responses API.`);
+    console.log(`Dry run: ${candidates.length} candidates would be sent to ${process.env.I18N_CLASSIFY_MODEL || 'gpt-5.5'} via Responses API with concurrency=${concurrencyLimit(args)}.`);
     console.log('Add --execute to upload images for classification.');
     return;
   }
 
-  for (const candidate of candidates) {
+  await runConcurrentJobs(candidates, args, async candidate => {
     const result = await classifyWithModel(candidate);
     const hasText = Boolean(result.hasText);
     candidate.detectionStatus = hasText ? 'text' : 'non_text';
@@ -545,7 +578,7 @@ async function runClassify(args) {
     }
     saveManifest(manifest);
     console.log(`${hasText ? 'text' : 'non_text'} ${candidate.sourceImagePath}`);
-  }
+  });
 }
 
 async function runGenerate(args) {
@@ -563,7 +596,7 @@ async function runGenerate(args) {
   const selectedJobs = jobs.slice(0, args.limit);
 
   if (!args.execute) {
-    console.log(`Dry run: ${selectedJobs.length} localized images would be generated with ${process.env.I18N_IMAGE_MODEL || 'gpt-image-2'} via Responses API.`);
+    console.log(`Dry run: ${selectedJobs.length} localized images would be generated with ${process.env.I18N_IMAGE_MODEL || 'gpt-image-2'} via Responses API with concurrency=${concurrencyLimit(args)}.`);
     console.log('Add --execute to upload images for generation.');
     return;
   }
@@ -622,15 +655,7 @@ async function runGenerate(args) {
     }
   }
 
-  let nextIndex = 0;
-  const concurrency = Math.min(10, Math.max(1, args.concurrency || 1));
-  async function worker() {
-    while (nextIndex < selectedJobs.length) {
-      const job = selectedJobs[nextIndex++];
-      await runJob(job.candidate, job.language, job.target);
-    }
-  }
-  await Promise.all(Array.from({ length: concurrency }, worker));
+  await runConcurrentJobs(selectedJobs, args, job => runJob(job.candidate, job.language, job.target));
 }
 
 async function main() {

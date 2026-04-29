@@ -86,6 +86,8 @@ node skills/i18n-workflow/tools/audit-i18n-assets.cjs --config=tools/i18n-workfl
 node skills/i18n-workflow/tools/generate-i18n-images.cjs --config=tools/i18n-workflow.config.cjs --generate --execute
 ```
 
+模型访问使用 `BASE_URL` 和 `API_KEY` 环境变量。分类和生成请求默认并发为 10，可用 `--concurrency=<1-10>` 调整。
+
 ### 重生成任务提取
 ```bash
 node skills/i18n-workflow/tools/extract-i18n-regeneration-jobs.cjs --config=tools/i18n-workflow.config.cjs --only=failed
