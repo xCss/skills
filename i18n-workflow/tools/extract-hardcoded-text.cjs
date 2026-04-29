@@ -7,6 +7,36 @@ const { loadConfig, writeReport, walk, rel } = require('./common.cjs');
 const config = loadConfig(process.argv.slice(2));
 const baseline = config.baselineLanguage || 'zh';
 
+const SEMANTIC_TEXT_KEYS = new Map([
+  ['使用中', 'using'],
+  ['解锁皮肤', 'unlock_skin'],
+  ['使用', 'use'],
+  ['开始游戏', 'start_game'],
+  ['第1关', 'level_1'],
+  ['任务目标', 'mission_goal'],
+  ['辅助工具', 'tools'],
+  ['重玩一次', 'replay'],
+  ['取消', 'cancel'],
+  ['确定', 'confirm'],
+  ['提 示', 'tips'],
+  ['提示', 'tips'],
+  ['是否确认关闭界面?', 'confirm_close'],
+  ['是否确认关闭界面？', 'confirm_close'],
+  ['放弃挑战', 'give_up'],
+  ['设 置', 'settings'],
+  ['设置', 'settings'],
+  ['背景音乐', 'background_music'],
+  ['游戏音效', 'sound_effects'],
+  ['皮 肤', 'skin'],
+  ['皮肤', 'skin'],
+  ['砖块', 'blocks'],
+  ['体力', 'stamina'],
+  ['奖励', 'reward'],
+  ['继续', 'continue'],
+  ['返回', 'back'],
+  ['关闭', 'close'],
+]);
+
 function resolveRoot(root) {
   return path.isAbsolute(root) ? root : path.join(config.projectRoot, root);
 }
@@ -19,8 +49,13 @@ function configuredRoots(values, fallback) {
 function isUserFacing(text) {
   const value = String(text || '').trim();
   if (!value) return false;
-  if (/^[\d\s:.,+\-xX%/]+$/.test(value)) return false;
-  return /[\p{L}一-鿿]/u.test(value);
+  if (/^[ds:.,+-xX%/]+$/.test(value)) return false;
+  return /[p{L}一-鿿]/u.test(value);
+}
+
+function semanticKeyForText(text) {
+  const normalized = String(text || '').trim().replace(/s+/g, ' ');
+  return SEMANTIC_TEXT_KEYS.get(normalized) || SEMANTIC_TEXT_KEYS.get(normalized.replace(/s+/g, '')) || null;
 }
 
 function keyFromText(file, text, index) {
@@ -28,7 +63,8 @@ function keyFromText(file, text, index) {
     .replace(/[^a-zA-Z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '')
     .toLowerCase() || 'text';
-  return `${base}.text_${index}`;
+  const semantic = semanticKeyForText(text);
+  return `${base}.${semantic || `text_${index}`}`;
 }
 
 function extractFromCocosPrefab(filePath) {
