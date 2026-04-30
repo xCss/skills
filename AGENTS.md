@@ -644,7 +644,8 @@ If any active caller remains, do not delete the wrapper. Patch the caller first 
 
 - **0-4 分**：不迁移，保持 Skill 文档化。
 - **5-8 分**：局部迁移，只把重复执行部分抽成 CLI。
-- **9 分及以上**：优先迁移为完整 Skill + CLI。
+- **9-12 分**：迁移为 Skill + CLI，但允许分阶段推进。
+- **13-14 分**：完整迁移目标明确，CLI 应接管核心执行能力；旧入口只作为临时兼容 wrapper 保留，并进入 deprecation/removal 流程。
 
 ### 应该迁移的信号
 
