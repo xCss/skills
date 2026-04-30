@@ -1,5 +1,22 @@
 # i18n Workflow
 
+> Compatibility note: the canonical skill entry is now `SKILL.md`. This file is kept for older agents and installations that still load `i18n-workflow.md` directly.
+
+## 稳定 CLI 入口
+
+优先调用统一 CLI，而不是临时拼脚本或直接串多个旧工具：
+
+```bash
+node skills/i18n-workflow/scripts/i18n-workflow-cli.cjs --help
+node skills/i18n-workflow/scripts/i18n-workflow-cli.cjs doctor --config tools/i18n-workflow.config.cjs
+node skills/i18n-workflow/scripts/i18n-workflow-cli.cjs probe --config tools/i18n-workflow.config.cjs
+node skills/i18n-workflow/scripts/i18n-workflow-cli.cjs run --config tools/i18n-workflow.config.cjs --steps extract,audit,jobs,review --dry-run
+```
+
+旧 `tools/*.cjs` 入口保留为兼容实现层；新自动化应优先走 `scripts/i18n-workflow-cli.cjs`，确保 stdout 是结构化 JSON。
+
+迁移评分、调用方搜索和旧入口删除策略见 `references/migration-assessment.md`。
+
 当用户提到多语言、i18n、国际化、新增语言、文字图片生成、资源审计、图片对比复核、重生成任务等相关话题时，按以下流程执行。
 
 ## 权威文档
@@ -62,7 +79,9 @@
 - 如果项目没有图片本地化需求，`getSpriteFrameMap()` 保持返回 `{}` 即可。
 - 确认 `assetsRoot`、`resourcesRoot`、`reportDirectory` 等路径与当前项目结构匹配。
 
-## 可用工具
+## 旧工具入口（仅兼容 / 调试 fallback）
+
+以下命令是旧入口，保留用于兼容和底层调试。常规自动化必须优先调用 `scripts/i18n-workflow-cli.cjs`，不要直接串联这些脚本。
 
 以下工具全部在本 skill 包的 `tools/` 目录中，路径相对于项目根目录为 `skills/i18n-workflow/tools/`。
 

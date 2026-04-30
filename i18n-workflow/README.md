@@ -10,7 +10,24 @@ Copy and paste the following command to your agent (Claude Code, etc.):
 git clone git@github.com:xCss/skills.git /tmp/_skills_repo && mkdir -p skills && cp -r /tmp/_skills_repo/i18n-workflow skills/i18n-workflow && rm -rf /tmp/_skills_repo && mkdir -p tools && cp skills/i18n-workflow/templates/config.example.cjs tools/i18n-workflow.config.cjs && echo "Done. Edit tools/i18n-workflow.config.cjs to bind your project."
 ```
 
-After installation, edit `tools/i18n-workflow.config.cjs` to match your project structure, then tell your agent to read `skills/i18n-workflow/README.md` for the full workflow.
+After installation, edit `tools/i18n-workflow.config.cjs` to match your project structure, then tell your agent to load the `i18n-workflow` skill. The skill uses `SKILL.md` for routing and `scripts/i18n-workflow-cli.cjs` for repeatable execution.
+
+## CLI Entry Point
+
+Primary command from `skills/i18n-workflow/`:
+
+```bash
+node scripts/i18n-workflow-cli.cjs --help
+node scripts/i18n-workflow-cli.cjs doctor --config tools/i18n-workflow.config.cjs
+node scripts/i18n-workflow-cli.cjs probe --config tools/i18n-workflow.config.cjs
+node scripts/i18n-workflow-cli.cjs run --config tools/i18n-workflow.config.cjs --steps extract,audit,jobs,review --dry-run
+node scripts/i18n-workflow-cli.cjs cleanup tools/reports/.tmp-i18n-images
+node scripts/i18n-workflow-cli.cjs self-test
+```
+
+The older `tools/*.cjs` scripts remain as implementation/compatibility tools. New automation should call the CLI facade so stdout stays JSON-parseable.
+
+See `references/migration-assessment.md` for the migration score, known caller search, and legacy entry removal policy.
 
 ## Current Worktree Boundary
 
