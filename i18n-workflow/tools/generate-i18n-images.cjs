@@ -18,7 +18,7 @@ const knownNonTextPatterns = [
   /GamePrivacy\/(block|btn\d*)\.png$/,
   /GameFree\/(tl|free_item|!)\.png$/,
   /GameHome\/tili_\d+\.png$/,
-  /GamePhysicalRoom\/(fanhui|block_room|neng)\.png$/,
+  /GamePhysicalRoom\/(block_room|neng)\.png$/,
   /GameReceive\/(close|y|hand|bg\d*|\d+)\.png$/,
   /GameReceiveRoom\/close\.png$/,
   /GameSetupRoom\/block\.png$/,
@@ -98,6 +98,23 @@ function classifyCandidate(sourceImagePath) {
   return 'uncertain';
 }
 
+function normalizeSourceImagePath(imagePath) {
+  const absolute = path.isAbsolute(imagePath) ? imagePath : path.join(projectRoot, imagePath);
+  return rel(absolute);
+}
+
+function resourcesPathFromSourceImage(sourceImagePath) {
+  const resourcesPrefix = `${toPosix(path.relative(projectRoot, resourcesRoot))}/`;
+  return sourceImagePath.startsWith(resourcesPrefix)
+    ? sourceImagePath.slice(resourcesPrefix.length).replace(/\.(png|jpg|jpeg|webp)$/i, '')
+    : sourceImagePath.replace(/\.(png|jpg|jpeg|webp)$/i, '');
+}
+
+function sourceFileSize(sourceImagePath) {
+  const absolute = path.join(projectRoot, sourceImagePath);
+  return fs.existsSync(absolute) ? fs.statSync(absolute).size : null;
+}
+
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
 }
@@ -105,6 +122,79 @@ function readJson(filePath) {
 function writeJson(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function mergeConfigEnumeratedTextImages(manifest) {
+  if (typeof config.enumerateSourceTextImages !== 'function') return manifest;
+
+  for (const source of config.enumerateSourceTextImages() || []) {
+    const sourceImagePath = normalizeSourceImagePath(source.imagePath);
+    const sourceResourcesPath = source.resourcesPath || resourcesPathFromSourceImage(sourceImagePath);
+    const key = source.spriteFrameUuid || sourceResourcesPath;
+    const existing = manifest.candidates.find(candidate => (source.spriteFrameUuid && candidate.spriteFrameUuid === source.spriteFrameUuid)
+      || candidate.sourceResourcesPath === sourceResourcesPath);
+    const candidate = existing || {
+      spriteFrameUuid: source.spriteFrameUuid || null,
+      sourceImagePath,
+      sourceResourcesPath,
+      width: source.width,
+      height: source.height,
+      sourceBytes: source.sourceBytes || sourceFileSize(sourceImagePath),
+      detectionStatus: (source.hasText === false) ? 'non_text' : 'text',
+      embeddedText: source.embeddedText || null,
+      semanticMeaning: source.semanticMeaning || null,
+      generationHint: source.generationHint || null,
+      renderMode: source.renderMode || null,
+      renderOptions: source.renderOptions || null,
+      textComposite: source.textComposite || null,
+      preserveSourceAlpha: Boolean(source.preserveSourceAlpha),
+      transparentEdgeBackground: Boolean(source.transparentEdgeBackground),
+      targets: {},
+      notes: [],
+    };
+
+    candidate.spriteFrameUuid = candidate.spriteFrameUuid || source.spriteFrameUuid || key;
+    candidate.sourceImagePath = sourceImagePath;
+    candidate.sourceResourcesPath = sourceResourcesPath;
+    candidate.width = source.width || candidate.width;
+    candidate.height = source.height || candidate.height;
+    candidate.sourceBytes = source.sourceBytes || candidate.sourceBytes || sourceFileSize(sourceImagePath);
+    if (source.hasText !== false) candidate.detectionStatus = 'text';
+    candidate.embeddedText = source.embeddedText || candidate.embeddedText || null;
+    candidate.semanticMeaning = source.semanticMeaning || candidate.semanticMeaning || null;
+    candidate.generationHint = source.generationHint || candidate.generationHint || null;
+    candidate.renderMode = source.renderMode || candidate.renderMode || null;
+    candidate.renderOptions = source.renderOptions || candidate.renderOptions || null;
+    candidate.textComposite = source.textComposite || candidate.textComposite || null;
+    candidate.preserveSourceAlpha = Boolean(source.preserveSourceAlpha || candidate.preserveSourceAlpha);
+    candidate.transparentEdgeBackground = Boolean(source.transparentEdgeBackground || candidate.transparentEdgeBackground);
+    candidate.notes = candidate.notes || [];
+    if (!candidate.notes.some(note => note.type === 'config_enumerated_text_image')) {
+      candidate.notes.push({ at: new Date().toISOString(), type: 'config_enumerated_text_image' });
+    }
+
+    for (const language of targetLanguages) {
+      const resourcesPath = targetPathFor(sourceResourcesPath, language);
+      const exists = targetFileExists(resourcesPath);
+      const proposedText = source.localizedText && source.localizedText[language] || null;
+      const previous = candidate.targets[language] || {};
+      candidate.targets[language] = {
+        resourcesPath,
+        exists,
+        generationNeeded: source.hasText !== false && Boolean(proposedText) && !exists,
+        proposedText: proposedText || previous.proposedText || null,
+        generatedPath: previous.generatedPath || null,
+        outputBytes: previous.outputBytes || null,
+        status: source.hasText === false ? 'skipped_non_text' : (proposedText || previous.proposedText ? 'config_pending_generation' : 'manual_missing_translation'),
+        generatedMetaPath: previous.generatedMetaPath || undefined,
+        generatedSpriteFrameUuid: previous.generatedSpriteFrameUuid || undefined,
+      };
+    }
+
+    if (!existing) manifest.candidates.push(candidate);
+  }
+
+  return manifest;
 }
 
 function buildManifestFromAudit() {
@@ -146,7 +236,7 @@ function buildManifestFromAudit() {
     };
   });
 
-  return {
+  return mergeConfigEnumeratedTextImages({
     generatedAt: new Date().toISOString(),
     mode: 'dry-run',
     modelPlan: {
@@ -162,11 +252,11 @@ function buildManifestFromAudit() {
     },
     summary: summarize(candidates),
     candidates,
-  };
+  });
 }
 
 function loadManifestOrBuild() {
-  return fs.existsSync(manifestPath) ? readJson(manifestPath) : buildManifestFromAudit();
+  return fs.existsSync(manifestPath) ? mergeConfigEnumeratedTextImages(readJson(manifestPath)) : buildManifestFromAudit();
 }
 
 function summarize(candidates) {
@@ -342,6 +432,324 @@ function normalizeGeneratedPng(buffer, candidate) {
   return resizePngWithUv(buffer, candidate.width, candidate.height);
 }
 
+function preserveSourceAlphaWithUv(buffer, candidate) {
+  const sourcePath = path.join(projectRoot, candidate.sourceImagePath);
+  const tempDir = path.join(projectRoot, 'tools', 'reports', '.tmp-i18n-images');
+  fs.mkdirSync(tempDir, { recursive: true });
+  const token = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const generatedPath = path.join(tempDir, `${token}-generated.png`);
+  const outputPath = path.join(tempDir, `${token}-alpha.png`);
+  fs.writeFileSync(generatedPath, buffer);
+
+  const script = [
+    'from PIL import Image',
+    'import sys',
+    'src_path, gen_path, out_path = sys.argv[1], sys.argv[2], sys.argv[3]',
+    'src = Image.open(src_path).convert("RGBA")',
+    'gen = Image.open(gen_path).convert("RGBA")',
+    'if src.size != gen.size:',
+    '    src = src.resize(gen.size, Image.Resampling.LANCZOS)',
+    'src_alpha = src.getchannel("A")',
+    'r, g, b, _ = gen.split()',
+    'out = Image.merge("RGBA", (r, g, b, src_alpha))',
+    'out.save(out_path, optimize=True)',
+  ].join('\n');
+
+  const result = spawnSync('uv', ['run', '--with', 'pillow', 'python', '-c', script, sourcePath, generatedPath, outputPath], {
+    cwd: projectRoot,
+    encoding: 'utf8',
+  });
+
+  if (result.status !== 0) {
+    throw new Error(`uv/Pillow alpha preservation failed: ${(result.stderr || result.stdout || '').slice(0, 1000)}`);
+  }
+
+  const output = fs.readFileSync(outputPath);
+  fs.rmSync(generatedPath, { force: true });
+  fs.rmSync(outputPath, { force: true });
+  return output;
+}
+
+function removeEdgeBackgroundWithUv(buffer) {
+  const tempDir = path.join(projectRoot, 'tools', 'reports', '.tmp-i18n-images');
+  fs.mkdirSync(tempDir, { recursive: true });
+  const token = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const inputPath = path.join(tempDir, `${token}-edge-input.png`);
+  const outputPath = path.join(tempDir, `${token}-edge-output.png`);
+  fs.writeFileSync(inputPath, buffer);
+
+  const script = [
+    'from PIL import Image',
+    'from collections import deque',
+    'import sys',
+    'src, dst = sys.argv[1], sys.argv[2]',
+    'img = Image.open(src).convert("RGBA")',
+    'px = img.load()',
+    'w, h = img.size',
+    'corners = [px[0,0], px[w-1,0], px[0,h-1], px[w-1,h-1]]',
+    'threshold = 58',
+    'def close_to_corner(c):',
+    '    if c[3] <= 8:',
+    '        return True',
+    '    return min(abs(c[0]-b[0]) + abs(c[1]-b[1]) + abs(c[2]-b[2]) for b in corners) <= threshold',
+    'q = deque()',
+    'seen = set()',
+    'def add(x, y):',
+    '    if x < 0 or y < 0 or x >= w or y >= h or (x, y) in seen:',
+    '        return',
+    '    if close_to_corner(px[x, y]):',
+    '        seen.add((x, y))',
+    '        q.append((x, y))',
+    'for x in range(w):',
+    '    add(x, 0); add(x, h - 1)',
+    'for y in range(h):',
+    '    add(0, y); add(w - 1, y)',
+    'while q:',
+    '    x, y = q.popleft()',
+    '    r, g, b, a = px[x, y]',
+    '    px[x, y] = (r, g, b, 0)',
+    '    add(x + 1, y); add(x - 1, y); add(x, y + 1); add(x, y - 1)',
+    'for y in range(h):',
+    '    for x in range(w):',
+    '        r, g, b, a = px[x, y]',
+    '        if a > 0 and min(r, g, b) >= 232 and max(r, g, b) - min(r, g, b) <= 28:',
+    '            px[x, y] = (r, g, b, 0)',
+    'seeds = set()',
+    'for y in range(h):',
+    '    for x in range(w):',
+    '        r, g, b, a = px[x, y]',
+    '        if a <= 8:',
+    '            continue',
+    '        lum = (r * 299 + g * 587 + b * 114) / 1000',
+    '        is_dark_text = lum < 132',
+    '        is_yellow_text = r >= 135 and g >= 85 and b <= 135 and r + 45 >= g',
+    '        if is_dark_text or is_yellow_text:',
+    '            seeds.add((x, y))',
+    'keep = set()',
+    'for x, y in seeds:',
+    '    for yy in range(max(0, y - 2), min(h, y + 3)):',
+    '        for xx in range(max(0, x - 2), min(w, x + 3)):',
+    '            keep.add((xx, yy))',
+    'for y in range(h):',
+    '    for x in range(w):',
+    '        if (x, y) not in keep:',
+    '            r, g, b, a = px[x, y]',
+    '            if a > 0:',
+    '                px[x, y] = (r, g, b, 0)',
+    'img.save(dst, optimize=True)',
+  ].join('\n');
+
+  const result = spawnSync('uv', ['run', '--with', 'pillow', 'python', '-c', script, inputPath, outputPath], {
+    cwd: projectRoot,
+    encoding: 'utf8',
+  });
+
+  if (result.status !== 0) {
+    throw new Error(`uv/Pillow edge background removal failed: ${(result.stderr || result.stdout || '').slice(0, 1000)}`);
+  }
+
+  const output = fs.readFileSync(outputPath);
+  fs.rmSync(inputPath, { force: true });
+  fs.rmSync(outputPath, { force: true });
+  return output;
+}
+
+function compositeGeneratedTextWithSource(buffer, candidate) {
+  const sourcePath = path.join(projectRoot, candidate.sourceImagePath);
+  const tempDir = path.join(projectRoot, 'tools', 'reports', '.tmp-i18n-images');
+  fs.mkdirSync(tempDir, { recursive: true });
+  const token = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const generatedPath = path.join(tempDir, `${token}-composite-generated.png`);
+  const outputPath = path.join(tempDir, `${token}-composite-output.png`);
+  const specPath = path.join(tempDir, `${token}-composite-spec.json`);
+  fs.writeFileSync(generatedPath, buffer);
+  fs.writeFileSync(specPath, `${JSON.stringify(candidate.textComposite || {}, null, 2)}\n`);
+
+  const script = [
+    'from PIL import Image',
+    'import json, sys',
+    'source_path, generated_path, spec_path, output_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]',
+    'opt = json.load(open(spec_path, encoding="utf-8"))',
+    'src = Image.open(source_path).convert("RGBA")',
+    'gen = Image.open(generated_path).convert("RGBA")',
+    'if gen.size != src.size:',
+    '    gen = gen.resize(src.size, Image.Resampling.LANCZOS)',
+    'base = src.copy()',
+    'px = base.load()',
+    'src_px = src.load()',
+    'gen_px = gen.load()',
+    'def clear_rect_from_neighbors(rect):',
+    '    x, y, w, h = [int(v) for v in rect]',
+    '    x2, y2 = min(base.width - 1, x + w), min(base.height - 1, y + h)',
+    '    lx, rx = max(0, x - 8), min(base.width - 1, x2 + 8)',
+    '    for yy in range(max(0, y), min(base.height, y2 + 1)):',
+    '        left = src_px[lx, yy]',
+    '        right = src_px[rx, yy]',
+    '        span = max(1, x2 - x)',
+    '        for xx in range(max(0, x), min(base.width, x2 + 1)):',
+    '            t = (xx - x) / span',
+    '            px[xx, yy] = tuple(int(round(left[i] * (1 - t) + right[i] * t)) for i in range(4))',
+    'def is_text_pixel(c):',
+    '    r, g, b, a = c',
+    '    if a <= 16:',
+    '        return False',
+    '    lum = (0.299 * r) + (0.587 * g) + (0.114 * b)',
+    '    chroma = max(r, g, b) - min(r, g, b)',
+    '    return lum <= opt.get("darkLum", 105) or (lum >= opt.get("lightLum", 155) and chroma <= opt.get("lightChroma", 110))',
+    'for rect in opt.get("clearRects", []) or ([opt["clearRect"]] if opt.get("clearRect") else []):',
+    '    clear_rect_from_neighbors(rect)',
+    'for rect in opt.get("textRects", []) or ([opt["textRect"]] if opt.get("textRect") else []):',
+    '    x, y, w, h = [int(v) for v in rect]',
+    '    for yy in range(max(0, y), min(base.height, y + h + 1)):',
+    '        for xx in range(max(0, x), min(base.width, x + w + 1)):',
+    '            if src_px[xx, yy][3] <= 8:',
+    '                continue',
+    '            gp = gen_px[xx, yy]',
+    '            if is_text_pixel(gp):',
+    '                px[xx, yy] = gp',
+    'base.putalpha(src.getchannel("A"))',
+    'base.save(output_path, optimize=True)',
+  ].join('\n');
+
+  const result = spawnSync('uv', ['run', '--with', 'pillow', 'python', '-c', script, sourcePath, generatedPath, specPath, outputPath], {
+    cwd: projectRoot,
+    encoding: 'utf8',
+  });
+
+  if (result.status !== 0) {
+    throw new Error(`uv/Pillow text compositing failed: ${(result.stderr || result.stdout || '').slice(0, 1000)}`);
+  }
+
+  const output = fs.readFileSync(outputPath);
+  fs.rmSync(generatedPath, { force: true });
+  fs.rmSync(outputPath, { force: true });
+  fs.rmSync(specPath, { force: true });
+  return output;
+}
+
+function renderWithWorkflowRenderer(candidate, language, text) {
+  const tempDir = path.join(projectRoot, 'tools', 'reports', '.tmp-i18n-images');
+  fs.mkdirSync(tempDir, { recursive: true });
+  const token = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const specPath = path.join(tempDir, `${token}-render-spec.json`);
+  const outputPath = path.join(tempDir, `${token}-render-output.png`);
+  const spec = {
+    mode: candidate.renderMode,
+    sourcePath: path.join(projectRoot, candidate.sourceImagePath),
+    width: candidate.width,
+    height: candidate.height,
+    language,
+    text,
+    options: candidate.renderOptions || {},
+  };
+  fs.writeFileSync(specPath, `${JSON.stringify(spec, null, 2)}\n`);
+
+  const script = [
+    'from PIL import Image, ImageDraw, ImageFont',
+    'import json, sys, os, math',
+    'spec = json.load(open(sys.argv[1], encoding="utf-8"))',
+    'out_path = sys.argv[2]',
+    'opt = spec.get("options") or {}',
+    'def rgba(value, default):',
+    '    value = value if value is not None else default',
+    '    if isinstance(value, str):',
+    '        value = value.lstrip("#")',
+    '        if len(value) == 6:',
+    '            return tuple(int(value[i:i+2], 16) for i in (0, 2, 4)) + (255,)',
+    '        if len(value) == 8:',
+    '            return tuple(int(value[i:i+2], 16) for i in (0, 2, 4, 6))',
+    '    return tuple(value)',
+    'def font(size):',
+    '    candidates = opt.get("fontPaths") or [',
+    '        "C:/Windows/Fonts/arialbd.ttf",',
+    '        "C:/Windows/Fonts/Arialbd.ttf",',
+    '        "C:/Windows/Fonts/segoeuib.ttf",',
+    '        "C:/Windows/Fonts/arial.ttf",',
+    '    ]',
+    '    for p in candidates:',
+    '        if os.path.exists(p):',
+    '            return ImageFont.truetype(p, size=size)',
+    '    return ImageFont.load_default()',
+    'direction = "rtl" if spec.get("language") == "ar" else None',
+    'language = spec.get("language")',
+    'def text_bbox(draw, xy, text, font, stroke):',
+    '    try:',
+    '        return draw.textbbox(xy, text, font=font, stroke_width=stroke, direction=direction, language=language)',
+    '    except Exception:',
+    '        return draw.textbbox(xy, text, font=font, stroke_width=stroke)',
+    'def draw_text(draw, xy, text, font, fill, stroke, stroke_fill):',
+    '    try:',
+    '        draw.text(xy, text, font=font, fill=fill, stroke_width=stroke, stroke_fill=stroke_fill, direction=direction, language=language)',
+    '    except Exception:',
+    '        draw.text(xy, text, font=font, fill=fill, stroke_width=stroke, stroke_fill=stroke_fill)',
+    'if spec.get("language") == "ar":',
+    '    try:',
+    '        import arabic_reshaper',
+    '        from bidi.algorithm import get_display',
+    '        spec["text"] = get_display(arabic_reshaper.reshape(spec["text"]))',
+    '        direction = None',
+    '    except Exception:',
+    '        pass',
+    'def fit_font(draw, text, rect, start, stroke):',
+    '    x, y, w, h = rect',
+    '    for size in range(int(start), 9, -1):',
+    '        f = font(size)',
+    '        box = text_bbox(draw, (0, 0), text, f, stroke)',
+    '        if box[2] - box[0] <= w and box[3] - box[1] <= h:',
+    '            return f',
+    '    return font(10)',
+    'def draw_centered(draw, text, rect):',
+    '    stroke = int(opt.get("strokeWidth", 0))',
+    '    f = fit_font(draw, text, rect, opt.get("fontSize", min(spec["height"], 40)), stroke)',
+    '    box = text_bbox(draw, (0, 0), text, f, stroke)',
+    '    tw, th = box[2] - box[0], box[3] - box[1]',
+    '    x = rect[0] + (rect[2] - tw) / 2 - box[0]',
+    '    y = rect[1] + (rect[3] - th) / 2 - box[1]',
+    '    shadow = opt.get("shadow")',
+    '    if shadow:',
+    '        sx, sy = opt.get("shadowOffset", [2, 3])',
+    '        draw_text(draw, (x + sx, y + sy), text, f, rgba(shadow, [0,0,0,90]), stroke, rgba(opt.get("shadowStroke"), shadow))',
+    '    draw_text(draw, (x, y), text, f, rgba(opt.get("fill"), [255,255,255,255]), stroke, rgba(opt.get("stroke"), [0,0,0,255]))',
+    'def clear_rect_from_neighbors(img, rect):',
+    '    px = img.load()',
+    '    x, y, w, h = [int(v) for v in rect]',
+    '    x2, y2 = min(img.width - 1, x + w), min(img.height - 1, y + h)',
+    '    lx, rx = max(0, x - 8), min(img.width - 1, x2 + 8)',
+    '    for yy in range(max(0, y), min(img.height, y2 + 1)):',
+    '        left = px[lx, yy]',
+    '        right = px[rx, yy]',
+    '        span = max(1, x2 - x)',
+    '        for xx in range(max(0, x), min(img.width, x2 + 1)):',
+    '            t = (xx - x) / span',
+    '            px[xx, yy] = tuple(int(round(left[i] * (1 - t) + right[i] * t)) for i in range(4))',
+    'mode = spec.get("mode")',
+    'if mode == "button-template":',
+    '    img = Image.open(spec["sourcePath"]).convert("RGBA")',
+    '    if opt.get("clearRect"):',
+    '        clear_rect_from_neighbors(img, opt["clearRect"])',
+    'else:',
+    '    img = Image.new("RGBA", (int(spec["width"]), int(spec["height"])), (0,0,0,0))',
+    'draw = ImageDraw.Draw(img)',
+    'rect = opt.get("textRect") or [0, 0, img.width, img.height]',
+    'draw_centered(draw, spec["text"], rect)',
+    'img.save(out_path, optimize=True)',
+  ].join('\n');
+
+  const result = spawnSync('uv', ['run', '--with', 'pillow', '--with', 'arabic-reshaper', '--with', 'python-bidi', 'python', '-c', script, specPath, outputPath], {
+    cwd: projectRoot,
+    encoding: 'utf8',
+  });
+
+  if (result.status !== 0) {
+    throw new Error(`workflow local renderer failed: ${(result.stderr || result.stdout || '').slice(0, 1000)}`);
+  }
+
+  const output = fs.readFileSync(outputPath);
+  fs.rmSync(specPath, { force: true });
+  fs.rmSync(outputPath, { force: true });
+  return output;
+}
+
 function outputSizeLimit(candidate) {
   const absoluteCap = Number(process.env.I18N_MAX_IMAGE_BYTES || 262144);
   const minimumCap = Number(process.env.I18N_MIN_IMAGE_BYTES || 32768);
@@ -462,6 +870,7 @@ async function generateWithModel(candidate, language, text) {
     'Do not render tiny text centered on a large empty bar. Do not crop or change the image resolution.',
     'For Arabic, render readable right-to-left Arabic text with correct letter shaping and the same visual scale as the Chinese source text.',
     'Do not add extra decorative elements. Keep the file lightweight for H5.',
+    candidate.generationHint ? `Project-specific visual instruction: ${candidate.generationHint}` : '',
     extraGuidance || '',
   ].filter(Boolean).join('\n');
 
@@ -603,9 +1012,20 @@ async function runGenerate(args) {
 
   async function runJob(candidate, language, target) {
     try {
-      let buffer = await generateWithModel(candidate, language, target.proposedText);
+      let buffer = candidate.renderMode
+        ? renderWithWorkflowRenderer(candidate, language, target.proposedText)
+        : await generateWithModel(candidate, language, target.proposedText);
       try {
         buffer = normalizeGeneratedPng(buffer, candidate);
+        if (candidate.textComposite) {
+          buffer = compositeGeneratedTextWithSource(buffer, candidate);
+        }
+        if (candidate.preserveSourceAlpha) {
+          buffer = preserveSourceAlphaWithUv(buffer, candidate);
+        }
+        if (candidate.transparentEdgeBackground) {
+          buffer = removeEdgeBackgroundWithUv(buffer);
+        }
       } catch (error) {
         target.status = 'rejected_postprocess';
         target.outputBytes = buffer.length;

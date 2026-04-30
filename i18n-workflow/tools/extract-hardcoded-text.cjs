@@ -49,6 +49,7 @@ function configuredRoots(values, fallback) {
 function isUserFacing(text) {
   const value = String(text || '').trim();
   if (!value) return false;
+  if (/^[a-z0-9_]+(?:\.[a-z0-9_-]+)+$/i.test(value)) return false;
   if (/^[ds:.,+-xX%/]+$/.test(value)) return false;
   return /[p{L}一-鿿]/u.test(value);
 }

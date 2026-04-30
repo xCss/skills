@@ -23,7 +23,7 @@ const knownNonTextPatterns = [
   /GamePrivacy\/(block|btn\d*)\.png$/,
   /GameFree\/(tl|free_item|!)\.png$/,
   /GameHome\/tili_\d+\.png$/,
-  /GamePhysicalRoom\/(fanhui|block_room|neng)\.png$/,
+  /GamePhysicalRoom\/(block_room|neng)\.png$/,
   /GameReceive\/(close|y|hand|bg\d*|\d+)\.png$/,
   /GameReceiveRoom\/close\.png$/,
   /GameSetupRoom\/block\.png$/,
