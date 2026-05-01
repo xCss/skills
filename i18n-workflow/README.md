@@ -27,7 +27,7 @@ node scripts/i18n-workflow-cli.cjs self-test
 
 The older `tools/*.cjs` scripts remain as implementation/compatibility tools. New automation should call the CLI facade so stdout stays JSON-parseable.
 
-See `references/migration-assessment.md` for the migration score, known caller search, and legacy entry removal policy.
+See [references/migration-assessment.md](references/migration-assessment.md) for the migration score, known caller search, and legacy entry removal policy. See [references/provider-resolution.md](references/provider-resolution.md) for image-generation provider and credential handling.
 
 ## Current Worktree Boundary
 
@@ -45,7 +45,7 @@ This playbook covers:
 - Failed-item extraction and regeneration jobs.
 - Adding a new language end-to-end.
 
-It does **not** assume any specific engine, directory layout, or runtime configuration file. Project-specific bindings are declared in an adapter/config (see `contracts.md`).
+It does **not** assume any specific engine, directory layout, or runtime configuration file. Project-specific bindings are declared in an adapter/config (see [contracts.md](contracts.md)).
 
 ## Language Model
 
@@ -133,11 +133,11 @@ For each generated image, compare against the baseline:
 
 ### 6. Regeneration Jobs
 
-Extract failed items from quality and comparison audits. Classify failure reasons using the standard enum (see `contracts.md`). Output a structured job list for retry.
+Extract failed items from quality and comparison audits. Classify failure reasons using the standard enum (see [contracts.md](contracts.md)). Output a structured job list for retry.
 
 ### 7. Human Review
 
-Use review sheets and checklists (`checklists.md`) for manual verification.
+Use review sheets and checklists ([checklists.md](checklists.md)) for manual verification.
 
 ### 8. Regression Verification
 

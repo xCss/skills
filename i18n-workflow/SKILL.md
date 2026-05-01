@@ -70,7 +70,7 @@ The agent should call this CLI instead of writing temporary Node, Python, or she
 6. Use `cleanup` only for explicit temporary paths.
 7. For API-backed image generation, explain that `--execute` consumes API calls before running it.
 
-Migration rationale and legacy-entry policy are recorded in `references/migration-assessment.md`.
+Migration rationale and legacy-entry policy are recorded in [references/migration-assessment.md](references/migration-assessment.md). Provider and credential handling for image generation are documented in [references/provider-resolution.md](references/provider-resolution.md).
 
 ## Command Routing
 
@@ -121,7 +121,7 @@ Never print API keys, tokens, cookies, passwords, full Authorization headers, or
 - Do not make the agent reconstruct locale coverage or image manifests manually when the CLI can run the workflow.
 - Do not mix debug noise into stdout; the wrapper must keep stdout machine-readable JSON.
 - Do not delete old `tools/*.cjs` entry points without a migration window; they are compatibility implementation tools.
-- Do not convert legacy tools to wrappers until known direct callers have migrated; see `references/migration-assessment.md`.
+- Do not convert legacy tools to wrappers until known direct callers have migrated; see [references/migration-assessment.md](references/migration-assessment.md).
 
 ## Verification Checklist
 
