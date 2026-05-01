@@ -71,7 +71,7 @@
 
 模板：
 
-```md
+````md
 ---
 name: example-skill-name
 description: Use when the user needs <task class>. Routes requests to the stable CLI instead of ad-hoc scripts.
@@ -121,18 +121,18 @@ Do not use this skill when:
 
 Primary command:
 
-\`\`\`bash
+```bash
 example-cli --help
-\`\`\`
+```
 
 Required subcommands:
 
-\`\`\`bash
+```bash
 example-cli doctor
 example-cli probe
 example-cli run --input ... --out ...
 example-cli cleanup ...
-\`\`\`
+```
 
 The agent should call the CLI instead of writing temporary scripts.
 
@@ -153,18 +153,18 @@ CLI commands must print JSON to stdout.
 
 Successful output should look like:
 
-\`\`\`json
+```json
 {
   "ok": true,
   "result": "...",
   "media": "/tmp/output.png",
   "warnings": []
 }
-\`\`\`
+```
 
 Failure output should look like:
 
-\`\`\`json
+```json
 {
   "ok": false,
   "error": {
@@ -173,7 +173,7 @@ Failure output should look like:
     "detail": "safe diagnostic detail without secrets"
   }
 }
-\`\`\`
+```
 
 Never print secrets, API keys, tokens, passwords, cookies, or full connection strings.
 
@@ -198,7 +198,7 @@ Never print secrets, API keys, tokens, passwords, cookies, or full connection st
 - [ ] No secrets are printed.
 - [ ] Backward-compatible wrapper exists if replacing an older script.
 - [ ] Cleanup behavior is tested.
-```
+````
 
 ---
 
@@ -1013,7 +1013,7 @@ python3 scripts/old_wrapper.py --help
 
 完成后向用户汇报：
 
-```md
+````md
 已完成 `<skill-name>` 的 Skill + CLI 评估/迁移。
 
 评估：
@@ -1052,7 +1052,7 @@ python3 scripts/old_wrapper.py --help
 - 如果使用成熟外部 CLI，不要生成一对一 wrapper。
 
 后续使用时，agent 应调用稳定 CLI 或成熟外部 CLI，而不是临时写脚本。
-```
+````
 
 ---
 
