@@ -121,18 +121,18 @@ Do not use this skill when:
 
 Primary command:
 
-```bash
+\`\`\`bash
 example-cli --help
-```
+\`\`\`
 
 Required subcommands:
 
-```bash
+\`\`\`bash
 example-cli doctor
 example-cli probe
 example-cli run --input ... --out ...
 example-cli cleanup ...
-```
+\`\`\`
 
 The agent should call the CLI instead of writing temporary scripts.
 
@@ -153,18 +153,18 @@ CLI commands must print JSON to stdout.
 
 Successful output should look like:
 
-```json
+\`\`\`json
 {
   "ok": true,
   "result": "...",
   "media": "/tmp/output.png",
   "warnings": []
 }
-```
+\`\`\`
 
 Failure output should look like:
 
-```json
+\`\`\`json
 {
   "ok": false,
   "error": {
@@ -173,7 +173,7 @@ Failure output should look like:
     "detail": "safe diagnostic detail without secrets"
   }
 }
-```
+\`\`\`
 
 Never print secrets, API keys, tokens, passwords, cookies, or full connection strings.
 
@@ -352,6 +352,45 @@ exp-imagegen generate --prompt-file /tmp/notice_prompt.txt --size 1024x1536 --ou
 3. 是否真的需要新增一个领域 CLI。
 4. 不要为了单个 Skill 创建单用途小脚本。
 
+### 成熟外部 CLI 优先原则
+
+如果某个 Skill 本质上是成熟外部 CLI 的使用指南、路由层或命令参考，不要再生成一层一对一 wrapper。
+
+正确做法：
+
+- Skill 保留使用场景判断、命令参考、auth/setup 说明、常见 workflow 示例、fallback 与验证清单。
+- CLI 层直接使用成熟外部 CLI。
+- 只有当多个 Skill 需要复用一组多步骤工作流时，才创建领域 helper CLI。
+
+典型例子：
+
+```text
+gh-cli -> 使用官方 gh
+docker skill -> 使用 docker
+kubectl skill -> 使用 kubectl
+ffmpeg/media skill -> 优先使用 ffmpeg，必要时再封装领域 workflow
+```
+
+错误做法：
+
+```text
+gh-cli/scripts/skill-gh-cli-cli.py
+docker-cli/scripts/skill-docker-cli.py
+kubectl-cli/scripts/skill-kubectl-cli.py
+```
+
+这类 wrapper 只是把成熟 CLI 包一层，通常不会增加稳定性，反而增加维护成本和命名混乱。
+
+迁移评估时应输出：
+
+```json
+{
+  "external_cli": "gh",
+  "migration_strategy": "use-existing-external-cli",
+  "scaffold_action": "skip-wrapper"
+}
+```
+
 ---
 
 ## CLI 输出规范
@@ -455,9 +494,9 @@ else:
   "checks": {
     "config_exists": true,
     "env_exists": true,
-    "provider": "SUB",
+    "provider": "ExampleProvider",
     "base_url": "https://example.com/v1",
-    "key_env": "SUB_API_KEY",
+    "key_env": "API_KEY",
     "key_present": true
   }
 }
@@ -647,6 +686,53 @@ If any active caller remains, do not delete the wrapper. Patch the caller first 
 - **9-12 分**：迁移为 Skill + CLI，但允许分阶段推进。
 - **13-14 分**：完整迁移目标明确，CLI 应接管核心执行能力；旧入口只作为临时兼容 wrapper 保留，并进入 deprecation/removal 流程。
 
+### Recommendation 不等于 Migration Action
+
+评分结果只说明这个 Skill 是否值得把执行能力外置，不等于一定要创建新的 CLI 文件。
+
+评估输出应区分三个字段：
+
+```json
+{
+  "recommendation": "phase-skill-cli-migration",
+  "migration_strategy": "use-existing-external-cli",
+  "scaffold_action": "skip-wrapper"
+}
+```
+
+字段含义：
+
+- `recommendation`：是否值得 CLI 化。
+- `migration_strategy`：怎么 CLI 化。
+- `scaffold_action`：是否应该生成 scaffold 文件。
+
+推荐策略值：
+
+```text
+skill-only
+scaffold-new-cli
+extend-existing-domain-cli
+use-existing-external-cli
+```
+
+推荐 scaffold 动作：
+
+```text
+none
+create-scaffold
+extend-existing
+skip-wrapper
+```
+
+示例：
+
+| 场景 | recommendation | migration_strategy | scaffold_action |
+|---|---|---|---|
+| 纯写作规范 Skill | keep-skill-only | skill-only | none |
+| 图片生成 workflow | phase-skill-cli-migration | extend-existing-domain-cli | extend-existing |
+| `gh-cli` 参考 Skill | partial-cli-extraction 或 phase-skill-cli-migration | use-existing-external-cli | skip-wrapper |
+| 临时脚本堆积 Skill | complete-skill-cli-target | scaffold-new-cli | create-scaffold |
+
 ### 应该迁移的信号
 
 看到这些信号时，优先迁移：
@@ -685,6 +771,47 @@ rg '<skill-name>|old_script\.py|old-command-name' <skills-root> .
 - 是否已经存在相似 CLI。
 - 是否可以扩展现有 CLI，而不是新建。
 
+### 多 Skills Root 与重复技能名
+
+如果同时扫描多个 skills root，例如：
+
+```text
+~/.hermes/skills
+~/.hermes/hermes-agent/skills
+./skills
+```
+
+必须处理重复技能名。批量工具必须报告：
+
+```json
+{
+  "duplicate_skill_names": {
+    "hermes-agent": 2,
+    "github-pr-workflow": 2
+  }
+}
+```
+
+迁移时不能只靠 `--skill <name>` 盲选目标。遇到重复名称时，必须使用更精确的路径、root 或 rel_path。
+
+推荐输出字段：
+
+```json
+{
+  "name": "github-pr-workflow",
+  "path": "/abs/path/to/SKILL.md",
+  "root": "/abs/path/to/skills",
+  "rel_path": "github/github-pr-workflow"
+}
+```
+
+批量迁移报告必须同时给出：
+
+- 原始记录数
+- 去重后技能数
+- 重复技能名列表
+- 每个 root 的扫描数量
+
 ### 迁移输出要求
 
 如果决定迁移，最终汇报必须包含：
@@ -697,6 +824,134 @@ rg '<skill-name>|old_script\.py|old-command-name' <skills-root> .
 - 旧入口是否保留 wrapper。
 - 旧入口预计何时可删除。
 - 验证结果。
+
+---
+
+## 批量迁移工具要求
+
+如果用户要求评估或迁移多个现有 Skill，必须优先使用或创建 class-level auditor/orchestrator，而不是逐个手工迁移。
+
+批量 CLI 至少应提供只读命令：
+
+```bash
+<auditor-cli> doctor
+<auditor-cli> inventory --out inventory.json
+<auditor-cli> assess --out assessment.json
+<auditor-cli> plan --min-score 5 --out plan.json
+```
+
+可选写入命令：
+
+```bash
+<auditor-cli> migrate --skill <name>
+<auditor-cli> migrate --skill <name> --apply
+```
+
+要求：
+
+- `doctor` 本地检查，不做昂贵 API 调用。
+- `inventory` 只扫描目录，不修改文件。
+- `assess` 输出评分和原因。
+- `plan` 输出批次建议，不创建文件。
+- `migrate` 默认 dry-run。
+- `--apply` 才允许写 scaffold。
+- 不能批量重写 `SKILL.md`。
+- scaffold 不是完成迁移，必须在报告中明确标注。
+
+推荐 `plan` 汇总字段：
+
+```json
+{
+  "summary": {
+    "keep_skill_only": 41,
+    "partial_cli_extraction": 51,
+    "phase_skill_cli_migration": 93,
+    "complete_skill_cli_target": 14,
+    "migration_strategies": {
+      "scaffold-new-cli": 157,
+      "skill-only": 41,
+      "use-existing-external-cli": 1
+    },
+    "scaffold_actions": {
+      "create-scaffold": 157,
+      "none": 41,
+      "skip-wrapper": 1
+    },
+    "duplicate_skill_names": {}
+  }
+}
+```
+
+---
+
+## Skill + CLI vs Skill + MCP
+
+默认优先做 Skill + CLI。
+
+CLI 适合：
+
+- 本地可执行能力
+- 文件处理
+- 媒体、图片、文档处理
+- API 调用封装
+- 可通过 JSON stdout 交互的能力
+- 需要 `doctor` / `probe` / `cleanup` 的工作流
+- 多个 Skill 复用的领域能力
+
+只有满足以下情况时，才考虑 MCP：
+
+- 多个不同 MCP client 都要调用该能力
+- 需要长期运行的 server 状态
+- 需要 MCP schema/tool discovery
+- 需要与已有 MCP 生态集成
+- CLI 已经稳定，MCP 只是协议适配层
+
+推荐架构：
+
+```text
+Skill -> CLI
+MCP Server -> CLI
+```
+
+不要把业务逻辑只写在 MCP server 里。核心能力应在 CLI 中，MCP 只做薄适配。
+
+---
+
+## Python CLI 依赖与 uv
+
+Python CLI 推荐使用 `uv` 管理依赖和入口。
+
+如果 CLI 有第三方依赖，应提供：
+
+```text
+pyproject.toml
+uv.lock
+```
+
+推荐命令：
+
+```bash
+uv run python scripts/<cli>.py doctor
+uv run python scripts/<cli>.py probe
+```
+
+验证时避免在技能目录留下临时 `.venv`，可使用：
+
+```bash
+UV_PROJECT_ENVIRONMENT=/tmp/<skill-name>-venv uv run python scripts/<cli>.py doctor
+```
+
+如果系统 Python 缺少可选依赖，CLI 不应直接崩溃。优先：
+
+- 降级到有限能力
+- 输出 JSON warning
+- 在 `doctor` 中报告依赖缺失
+- 给出安装或 `uv sync` 提示
+
+例如 YAML frontmatter 解析：
+
+- 有 PyYAML：完整解析
+- 无 PyYAML：有限 fallback parser + warning
 
 ---
 
@@ -759,35 +1014,44 @@ python3 scripts/old_wrapper.py --help
 完成后向用户汇报：
 
 ```md
-已完成 `<skill-name>` 的 Skill + CLI 架构沉淀。
+已完成 `<skill-name>` 的 Skill + CLI 评估/迁移。
+
+评估：
+- classification: <knowledge/guidance | workflow/orchestration | script-heavy/prototype>
+- score: <0-14>
+- recommendation: <keep-skill-only | partial-cli-extraction | phase-skill-cli-migration | complete-skill-cli-target>
+- migration_strategy: <skill-only | scaffold-new-cli | extend-existing-domain-cli | use-existing-external-cli>
+- scaffold_action: <none | create-scaffold | extend-existing | skip-wrapper>
+- external_cli: <cmd or none>
 
 新增/修改：
 
 1. `SKILL.md`
    - 负责路由、规则、工作流、偏好说明。
 
-2. `scripts/<cli>.py`
-   - 稳定 CLI。
-   - 支持 `doctor`、`probe`、`run`、`cleanup`。
+2. `scripts/<cli>.py` 或 `external CLI: <cmd>`
+   - 稳定 CLI 或成熟外部 CLI。
+   - 支持 `doctor`、`probe`、主命令、`cleanup`，或说明外部 CLI 的等价验证命令。
 
 3. `references/...`
    - 记录 CLI 使用方式和维护说明。
 
 验证结果：
 
-- `py_compile`：通过
+- `py_compile`：通过 / 不适用
 - `<cli> --help`：通过
-- `<cli> doctor`：通过
-- `<cli> probe`：通过
-- cleanup：通过
+- `<cli> doctor`：通过 / 不适用
+- `<cli> probe`：通过 / 不适用
+- external CLI availability：通过 / 未安装但已说明
+- cleanup：通过 / 不适用
 
-后续使用时，agent 应调用：
+注意：
+- scaffold 是否只是占位。
+- wrapper 是否保留。
+- 何时可以删除旧入口。
+- 如果使用成熟外部 CLI，不要生成一对一 wrapper。
 
-```bash
-<cli> run ...
-```
-
-而不是临时写脚本。
+后续使用时，agent 应调用稳定 CLI 或成熟外部 CLI，而不是临时写脚本。
 ```
 
 ---
@@ -798,7 +1062,11 @@ If a user asks to create, migrate, or refactor a reusable skill, plugin, workflo
 
 For existing skills, the agent MUST NOT blindly migrate everything. It must first classify the skill and score migration value. Pure knowledge/guidance skills should usually remain as Skill-only documentation. Workflow or script-heavy skills should be migrated when the score justifies it.
 
-For existing skills that are selected for migration, the agent MUST NOT finish by only writing documentation. It must create or update an executable CLI, validate it, and document the command surface in `SKILL.md`. For skills that are not selected for migration, the agent should explicitly say why Skill-only is the better shape.
+For existing skills that are selected for migration, the agent MUST NOT finish by only writing documentation unless the correct migration strategy is `use-existing-external-cli`.
+
+If the migration strategy is `use-existing-external-cli`, the agent must verify or document the canonical external CLI, update the Skill to route to that CLI, avoid generating a one-to-one wrapper, document auth/setup and common commands, and report `scaffold_action: skip-wrapper`.
+
+Otherwise, it must create or update an executable domain CLI, validate it, and document the command surface in `SKILL.md`. For skills that are not selected for migration, the agent should explicitly say why Skill-only is the better shape.
 
 Temporary scripts are only allowed as prototypes. If the prototype works, it must be promoted into `scripts/<stable-cli>.py` before the task is considered complete.
 
