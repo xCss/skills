@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Image operations helper for the i18n workflow.
-Called via: uv run --with pillow python tools/i18n/image-ops.py <command> [options]
+Called via: uv run --with pillow python tools/image-ops.py <command> [options]
 
 Commands:
   inspect   --path <image>              Output JSON with width, height, mode, file_size.

@@ -44,4 +44,4 @@ Failure:
 
 The existing `tools/*.cjs` files remain available for compatibility. New automation should call the CLI facade first; direct tool calls are fallback/debugging paths.
 
-See `migration-assessment.md` for the migration score, caller search findings, and the legacy deprecation/removal policy.
+See [migration-assessment.md](migration-assessment.md) for the migration score, caller search findings, and the legacy deprecation/removal policy.
