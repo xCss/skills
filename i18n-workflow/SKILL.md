@@ -70,7 +70,7 @@ The agent should call this CLI instead of writing temporary Node, Python, or she
 6. Use `cleanup` only for explicit temporary paths.
 7. For API-backed image generation, explain that `--execute` consumes API calls before running it.
 
-Migration rationale and legacy-entry policy are recorded in [references/migration-assessment.md](references/migration-assessment.md). Provider and credential handling for image generation are documented in [references/provider-resolution.md](references/provider-resolution.md).
+Migration rationale and the complete CLI boundary are recorded in [references/migration-assessment.md](references/migration-assessment.md). Provider and credential handling for image generation are documented in [references/provider-resolution.md](references/provider-resolution.md).
 
 ## Command Routing
 
@@ -86,7 +86,7 @@ Migration rationale and legacy-entry policy are recorded in [references/migratio
 
 ## Output Contract
 
-The CLI prints JSON to stdout. Logs from legacy tools are captured inside JSON fields or sent to stderr by the wrapper.
+The CLI prints one JSON object to stdout for operational commands. Logs and diagnostics are returned in structured fields or written to stderr; API keys, tokens, cookies, passwords, full Authorization headers, and `.env` contents must never appear in output.
 
 Successful output:
 
@@ -119,9 +119,9 @@ Never print API keys, tokens, cookies, passwords, full Authorization headers, or
 - Do not add `en`, `ar`, `vi`, or any language to `supportedLanguages` unless the current worktree actually ships that language.
 - Do not use Git history to fill current-worktree audits unless the user requested a historical audit.
 - Do not make the agent reconstruct locale coverage or image manifests manually when the CLI can run the workflow.
-- Do not mix debug noise into stdout; the wrapper must keep stdout machine-readable JSON.
-- Do not delete old `tools/*.cjs` entry points without a migration window; they are compatibility implementation tools.
-- Do not convert legacy tools to wrappers until known direct callers have migrated; see [references/migration-assessment.md](references/migration-assessment.md).
+- Do not mix debug noise into stdout; the CLI must keep stdout machine-readable JSON.
+- Do not recreate deleted skill-level `tools/*.cjs` entry points; `scripts/i18n-workflow-cli.cjs` is the only supported execution surface.
+- Project-local paths such as `tools/i18n-workflow.config.cjs` and `tools/reports/` are user-project configuration/report locations, not skill implementation tools.
 
 ## Verification Checklist
 
@@ -129,8 +129,8 @@ Never print API keys, tokens, cookies, passwords, full Authorization headers, or
 - [ ] `scripts/i18n-workflow-cli.cjs --help` works.
 - [ ] `doctor` returns JSON and does not call external APIs.
 - [ ] `probe` returns JSON and checks local workflow readiness.
-- [ ] `run` returns JSON while preserving legacy tool output in structured fields.
+- [ ] `run` returns JSON with native CLI step results.
 - [ ] `cleanup` removes only explicitly supplied paths.
 - [ ] No command prints secrets.
-- [ ] Existing `tools/*.cjs` remain available for backward compatibility.
+- [ ] No direct calls to removed skill-level `tools/*.cjs` entries are introduced.
 - [ ] Migration score, caller search, and deprecation/removal policy are documented.

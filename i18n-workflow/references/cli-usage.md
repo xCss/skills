@@ -1,6 +1,6 @@
 # i18n Workflow CLI Usage
 
-`scripts/i18n-workflow-cli.cjs` is the stable command surface for this skill. It wraps the legacy implementation tools in `tools/` and keeps stdout JSON-parseable.
+`scripts/i18n-workflow-cli.cjs` is the stable command surface for this skill. It runs the native implementation modules under `scripts/i18n_workflow/` and keeps stdout JSON-parseable.
 
 ## Commands
 
@@ -40,8 +40,8 @@ Failure:
 }
 ```
 
-## Legacy Tools
+## Implementation Modules
 
-The existing `tools/*.cjs` files remain available for compatibility. New automation should call the CLI facade first; direct tool calls are fallback/debugging paths.
+The skill no longer exposes `tools/*.cjs` execution entries. New automation must call `scripts/i18n-workflow-cli.cjs`; implementation modules are internal and live under `scripts/i18n_workflow/`.
 
-See [migration-assessment.md](migration-assessment.md) for the migration score, caller search findings, and the legacy deprecation/removal policy.
+See [migration-assessment.md](migration-assessment.md) for the migration score and completed removal notes.

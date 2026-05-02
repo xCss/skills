@@ -10,7 +10,7 @@ Copy and paste the following command to your agent (Claude Code, etc.):
 git clone git@github.com:xCss/skills.git /tmp/_skills_repo && mkdir -p skills && cp -r /tmp/_skills_repo/i18n-workflow skills/i18n-workflow && rm -rf /tmp/_skills_repo && mkdir -p tools && cp skills/i18n-workflow/templates/config.example.cjs tools/i18n-workflow.config.cjs && echo "Done. Edit tools/i18n-workflow.config.cjs to bind your project."
 ```
 
-After installation, edit `tools/i18n-workflow.config.cjs` to match your project structure, then tell your agent to load the `i18n-workflow` skill. The skill uses `SKILL.md` for routing and `scripts/i18n-workflow-cli.cjs` for repeatable execution.
+After installation, edit the project-local `tools/i18n-workflow.config.cjs` to match your project structure, then tell your agent to load the `i18n-workflow` skill. The skill uses `SKILL.md` for routing and `scripts/i18n-workflow-cli.cjs` for repeatable execution.
 
 ## CLI Entry Point
 
@@ -25,9 +25,9 @@ node scripts/i18n-workflow-cli.cjs cleanup tools/reports/.tmp-i18n-images
 node scripts/i18n-workflow-cli.cjs self-test
 ```
 
-The older `tools/*.cjs` scripts remain as implementation/compatibility tools. New automation should call the CLI facade so stdout stays JSON-parseable.
+The CLI is the only execution surface. Implementation modules live under `scripts/i18n_workflow/`, and operational commands keep stdout JSON-parseable.
 
-See [references/migration-assessment.md](references/migration-assessment.md) for the migration score, known caller search, and legacy entry removal policy. See [references/provider-resolution.md](references/provider-resolution.md) for image-generation provider and credential handling.
+See [references/migration-assessment.md](references/migration-assessment.md) for the completed migration assessment. See [references/provider-resolution.md](references/provider-resolution.md) for image-generation provider and credential handling.
 
 ## Current Worktree Boundary
 

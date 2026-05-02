@@ -4,7 +4,7 @@
 
 ## 稳定 CLI 入口
 
-优先调用统一 CLI，而不是临时拼脚本或直接串多个旧工具：
+调用统一 CLI，不要临时拼脚本或直接调用内部模块：
 
 ```bash
 node skills/i18n-workflow/scripts/i18n-workflow-cli.cjs --help
@@ -13,9 +13,9 @@ node skills/i18n-workflow/scripts/i18n-workflow-cli.cjs probe --config tools/i18
 node skills/i18n-workflow/scripts/i18n-workflow-cli.cjs run --config tools/i18n-workflow.config.cjs --steps extract,audit,jobs,review --dry-run
 ```
 
-旧 `tools/*.cjs` 入口保留为兼容实现层；新自动化应优先走 `scripts/i18n-workflow-cli.cjs`，确保 stdout 是结构化 JSON。
+`scripts/i18n-workflow-cli.cjs` 是唯一执行入口；内部实现位于 `scripts/i18n_workflow/`，stdout 保持结构化 JSON。
 
-迁移评分、调用方搜索和旧入口删除策略见 `references/migration-assessment.md`。
+迁移评分和删除旧入口说明见 `references/migration-assessment.md`。
 
 当用户提到多语言、i18n、国际化、新增语言、文字图片生成、资源审计、图片对比复核、重生成任务等相关话题时，按以下流程执行。
 
@@ -79,49 +79,22 @@ node skills/i18n-workflow/scripts/i18n-workflow-cli.cjs run --config tools/i18n-
 - 如果项目没有图片本地化需求，`getSpriteFrameMap()` 保持返回 `{}` 即可。
 - 确认 `assetsRoot`、`resourcesRoot`、`reportDirectory` 等路径与当前项目结构匹配。
 
-## 旧工具入口（仅兼容 / 调试 fallback）
+## CLI 步骤映射
 
-以下命令是旧入口，保留用于兼容和底层调试。常规自动化必须优先调用 `scripts/i18n-workflow-cli.cjs`，不要直接串联这些脚本。
+所有阶段通过统一 `run` 命令选择：
 
-以下工具全部在本 skill 包的 `tools/` 目录中，路径相对于项目根目录为 `skills/i18n-workflow/tools/`。
-
-### 端到端编排
 ```bash
-node skills/i18n-workflow/tools/run-i18n-workflow.cjs --config=tools/i18n-workflow.config.cjs --steps=extract,audit,generate,jobs,review --dry-run
+node skills/i18n-workflow/scripts/i18n-workflow-cli.cjs run --config tools/i18n-workflow.config.cjs --steps extract,audit,generate,quality,compare,jobs,review --dry-run
 ```
 
-### 硬编码文本提取
-```bash
-node skills/i18n-workflow/tools/extract-hardcoded-text.cjs --config=tools/i18n-workflow.config.cjs
-```
-
-### 资源审计
-```bash
-node skills/i18n-workflow/tools/audit-i18n-assets.cjs --config=tools/i18n-workflow.config.cjs
-```
-
-### 图片生成（需要 API key）
-```bash
-node skills/i18n-workflow/tools/generate-i18n-images.cjs --config=tools/i18n-workflow.config.cjs --generate --execute
-```
+- `extract`：硬编码文本提取。
+- `audit`：资源 / sprite-frame / 本地化映射审计。
+- `generate`：manifest、分类和图片生成；真正调用 API 时需要 `--execute` 及 `BASE_URL` / `API_KEY`。
+- `quality` / `compare`：生成图片规格与对比质量报告。
+- `jobs`：失败重生成任务。
+- `review`：人工复核材料。
 
 模型访问使用 `BASE_URL` 和 `API_KEY` 环境变量。分类和生成请求默认并发为 10，可用 `--concurrency=<1-10>` 调整。
-
-### 重生成任务提取
-```bash
-node skills/i18n-workflow/tools/extract-i18n-regeneration-jobs.cjs --config=tools/i18n-workflow.config.cjs --only=failed
-```
-
-### 复核材料生成
-```bash
-node skills/i18n-workflow/tools/build-i18n-review-sheets.cjs --config=tools/i18n-workflow.config.cjs
-```
-
-### 图片检查（需要 uv + Pillow）
-```bash
-uv run --with pillow python skills/i18n-workflow/tools/image-ops.py inspect --path <图片路径>
-uv run --with pillow python skills/i18n-workflow/tools/image-ops.py compare --source <源图> --target <目标图>
-```
 
 ## 执行原则
 
