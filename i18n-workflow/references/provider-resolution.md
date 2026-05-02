@@ -35,7 +35,7 @@ Expected behavior:
 
 ## Safe Output Rules
 
-The CLI facade redacts sensitive fields and values before returning JSON. Output must not include:
+The CLI redacts sensitive fields and values before returning JSON. Output must not include:
 
 - API keys
 - tokens
