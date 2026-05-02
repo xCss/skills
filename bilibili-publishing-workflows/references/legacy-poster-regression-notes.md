@@ -31,7 +31,7 @@ The expected/default output is the legacy long-image layout:
 
 ## Implementation guidance
 
-- Prefer the original `bilibili-video-poster` implementation when present. If only the archived reference remains, reconstruct the HTML/CSS layout rather than using pure-PIL layout.
+- Preserve the migrated HTML/CSS implementation in `scripts/bilibili_publish_cli.py` and `templates/`; use archived references for behavior only, not as executable entry points.
 - Generate QR with high error correction and a larger quiet zone, e.g. `qrcode.QRCode(error_correction=ERROR_CORRECT_H, border=5)`; fit the QR into a white canvas so it has visible outer margin inside the pink QR panel.
 - For the top brand header, prefer a supplied Bilibili wordmark/logo reference image when available. Crop non-white bounds, resize to the header height, and render it as an image. This is more faithful than trying to simulate Bilibili typography with local CJK fonts.
 - If embedding a center logo in the QR, keep the logo small and backed by a white rounded square so scanability remains high.
