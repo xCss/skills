@@ -47,6 +47,10 @@ UV_PROJECT_ENVIRONMENT=/tmp/bilibili-publishing-workflows-venv \
 
 UV_PROJECT_ENVIRONMENT=/tmp/bilibili-publishing-workflows-venv \
   uv run --project bilibili-publishing-workflows \
+  python scripts/bilibili_publish_cli.py self-test --png
+
+UV_PROJECT_ENVIRONMENT=/tmp/bilibili-publishing-workflows-venv \
+  uv run --project bilibili-publishing-workflows \
   python scripts/bilibili_publish_cli.py generate \
     --url 'https://www.bilibili.com/video/BV.../' \
     --format png \
@@ -75,21 +79,22 @@ All operational subcommands write JSON only to stdout. Parse `ok`, `command`, `o
 
 ## Absorbed Reference Recipes
 
-- `references/bilibili-video-poster.md` — core poster extraction and generation.
-- `references/bilibili-video-poster-feishu-send.md` — archived Feishu image-send workflow and pitfalls.
-- `references/legacy-poster-regression-notes.md` — session-derived guardrails for preserving the legacy long-image layout, QR quiet-zone/icon handling, comment truncation, footer visibility, and avoiding generic card-style regressions.
-- `references/legacy-layout-iteration-notes.md` — concrete layout iteration notes: logo/wordmark inside the left info column, QR aligned in the same top row, separate single-line truncated title, and the f-string HTML escaping pitfall.
-- `references/b23-shortlinks.md` — Bilibili `b23.tv/<token>` shortlinks are server-generated mappings; preserve real user-supplied shortlinks. If only a BV/canonical URL is available, `https://b23.tv/BVxxxx` can be used as a compact redirect URL after verification (it is not a unique_k official share token).
-- `references/cli-usage.md` — canonical CLI command examples and JSON contract.
-- `references/provider-resolution.md` — provider/API/dependency resolution, credential redaction, and fallback rules.
+- [references/bilibili-video-poster.md](references/bilibili-video-poster.md) — core poster extraction and generation.
+- [references/bilibili-video-poster-feishu-send.md](references/bilibili-video-poster-feishu-send.md) — archived Feishu image-send workflow and pitfalls.
+- [references/legacy-poster-regression-notes.md](references/legacy-poster-regression-notes.md) — session-derived guardrails for preserving the legacy long-image layout, QR quiet-zone/icon handling, comment truncation, footer visibility, and avoiding generic card-style regressions.
+- [references/legacy-layout-iteration-notes.md](references/legacy-layout-iteration-notes.md) — concrete layout iteration notes: logo/wordmark inside the left info column, QR aligned in the same top row, separate single-line truncated title, and the f-string HTML escaping pitfall.
+- [references/b23-shortlinks.md](references/b23-shortlinks.md) — Bilibili `b23.tv/<token>` shortlinks are server-generated mappings; preserve real user-supplied shortlinks. If only a BV/canonical URL is available, `https://b23.tv/BVxxxx` can be used as a compact redirect URL after verification (it is not a unique_k official share token).
+- [references/cli-usage.md](references/cli-usage.md) — canonical CLI command examples and JSON contract.
+- [references/provider-resolution.md](references/provider-resolution.md) — provider/API/dependency resolution, credential redaction, and fallback rules.
 
 ## Implementation Files
 
-- `scripts/bilibili_publish_cli.py` — canonical stable CLI. It replaces the old scaffold and legacy generator; no compatibility wrapper is retained by request. It supports `doctor`, `probe`, `self-test`, `generate`, and safe temp-root `cleanup`.
-- `templates/bilibili-poster.html` — reusable HTML structure template; runtime generation fills video data and writes a per-run HTML file under `/tmp` for Playwright screenshotting.
-- `templates/bilibili-poster.css` — reusable poster CSS template; runtime generation injects font paths and embeds it into the per-run HTML.
-- `templates/bilibili-gradient-icon.png` — reusable default Bilibili icon template; not a `/tmp` runtime artifact.
-- `templates/bilibili-header-wordmark-transparent.png` — reusable transparent header logo/wordmark template (icon + polished “哔哩哔哩”); runtime generation may copy it into per-video cache, but the source template belongs under this skill's `templates/` directory.
+- [scripts/bilibili_publish_cli.py](scripts/bilibili_publish_cli.py) — canonical stable CLI entry point. It replaces the old scaffold and legacy generator; no compatibility wrapper is retained by request. It supports `doctor`, `probe`, `self-test`, `generate`, and safe temp-root `cleanup`.
+- [scripts/bilibili_publish/](scripts/bilibili_publish/) — split implementation package for runtime JSON/diagnostics, Bilibili API access, asset/QR preparation, rendering, and command wiring.
+- [templates/bilibili-poster.html](templates/bilibili-poster.html) — reusable HTML structure template; runtime generation fills video data and writes a per-run HTML file under `/tmp` for Playwright screenshotting.
+- [templates/bilibili-poster.css](templates/bilibili-poster.css) — reusable poster CSS template; runtime generation injects font paths and embeds it into the per-run HTML.
+- [templates/bilibili-gradient-icon.png](templates/bilibili-gradient-icon.png) — reusable default Bilibili icon template; not a `/tmp` runtime artifact.
+- [templates/bilibili-header-wordmark-transparent.png](templates/bilibili-header-wordmark-transparent.png) — reusable transparent header logo/wordmark template (icon + polished “哔哩哔哩”); runtime generation may copy it into per-video cache, but the source template belongs under this skill's `templates/` directory.
 
 ## Common Pitfalls
 

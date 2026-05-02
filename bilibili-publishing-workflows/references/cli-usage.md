@@ -15,6 +15,7 @@ python scripts/bilibili_publish_cli.py --help
 python scripts/bilibili_publish_cli.py doctor
 python scripts/bilibili_publish_cli.py probe --url 'https://www.bilibili.com/video/BV1Ai9eBKEU4/'
 python scripts/bilibili_publish_cli.py self-test
+python scripts/bilibili_publish_cli.py self-test --png
 python scripts/bilibili_publish_cli.py generate --url 'BV1Ai9eBKEU4' --format png --out /tmp/bilibili-poster.png
 python scripts/bilibili_publish_cli.py generate --url 'BV1Ai9eBKEU4' --format html --view-json /tmp/view.json --comments-json /tmp/comments.json --out /tmp/poster.html
 python scripts/bilibili_publish_cli.py cleanup /tmp/bilibili-poster.png /tmp/bilibili-poster-BV1Ai9eBKEU4_assets
@@ -28,6 +29,6 @@ Failure contains `ok: false`, `command`, `error.code`, and `error.message`. Debu
 
 ## Migration note
 
-`scripts/bilibili_publish_cli.py` is the only canonical execution entry. The previous scaffold and legacy generator were removed; no compatibility wrapper is retained.
+`scripts/bilibili_publish_cli.py` is the only canonical execution entry. The previous scaffold and legacy generator were removed; no compatibility wrapper is retained. Implementation code lives under `scripts/bilibili_publish/` so command wiring, diagnostics, API access, assets, and rendering can evolve independently.
 
-`cleanup` is intentionally limited to temp-directory outputs. Fixture mode (`--view-json` / `--comments-json`) is offline by default and does not download remote image assets.
+`doctor` reports Playwright Chromium launchability under `data.chromium.installed`. `self-test --png` performs a local fixture PNG smoke test. `cleanup` is intentionally limited to temp-directory outputs. Fixture mode (`--view-json` / `--comments-json`) is offline by default and does not download remote image assets.
