@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{TITLE}}</title>
+  <style>{{CSS}}</style>
+</head>
+<body>
+  <div class="poster">
+    <section class="header">
+      <div class="info-qr-row">
+        <div class="left-info">
+          <div class="brand"><img class="brand-image" src="{{WORDMARK_URI}}"></div>
+          <div class="summary">
+            <div class="meta-row"><span class="meta-label">作品类型：</span><span class="meta-value">视频</span></div>
+            <div class="meta-row"><span class="meta-label">评论数量：</span><span class="meta-value">{{REPLY_COUNT}}条</span></div>
+            <div class="meta-row"><span class="meta-label">弹幕数量：</span><span class="meta-value">{{DANMAKU_COUNT}}条</span></div>
+            <div class="meta-row"><span class="meta-label">视频时长：</span><span class="meta-value">{{DURATION}}</span></div>
+            <div class="meta-row"><span class="meta-label">UP主：</span><span class="meta-value">{{OWNER_NAME}}</span></div>
+          </div>
+        </div>
+        <div class="qr-panel">
+          <div class="qr-box"><img class="qr-image" src="{{QR_URI}}"></div>
+          <div class="qr-caption">扫码查看原视频</div>
+          <div class="qr-link">{{SHORT_LINK}}</div>
+        </div>
+      </div>
+      <div class="title-row"><div class="title">{{TITLE}}</div></div>
+    </section>
+    <section class="cover"><img src="{{COVER_URI}}"></section>
+    <section class="comments">{{COMMENTS_HTML}}</section>
+    <footer class="footer"><span>bilibili-video-poster</span><span class="pill">1.1.0</span><span>&amp; id</span><span class="pill">{{BVID}}</span></footer>
+  </div>
+</body>
+</html>
