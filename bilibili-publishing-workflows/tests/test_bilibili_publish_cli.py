@@ -36,6 +36,8 @@ class BilibiliPublishCliTest(unittest.TestCase):
         self.assertEqual(payload["command"], "doctor")
         self.assertIn("data", payload)
         self.assertIn("warnings", payload)
+        self.assertIn("chromium", payload["data"])
+        self.assertIn("installed", payload["data"]["chromium"])
 
     def test_generate_html_from_fixtures_returns_json_and_keeps_no_wrapper_paths(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -162,6 +164,15 @@ class BilibiliPublishCliTest(unittest.TestCase):
         payload = json.loads(result.stdout)
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["command"], "self-test")
+        self.assertTrue(payload["data"]["output_exists"])
+
+    def test_self_test_png_runs_optional_png_smoke(self) -> None:
+        result = run_cli("self-test", "--png")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["command"], "self-test")
+        self.assertEqual(payload["mime"], "image/png")
         self.assertTrue(payload["data"]["output_exists"])
 
 
