@@ -6,10 +6,17 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const skillRoot = path.resolve(__dirname, '..');
-const toolsDir = path.join(skillRoot, 'tools');
-const common = require(path.join(toolsDir, 'common.cjs'));
+const moduleDir = path.join(__dirname, 'i18n_workflow');
+const common = require(path.join(moduleDir, 'common.cjs'));
+const { runExtract } = require(path.join(moduleDir, 'extract.cjs'));
+const { runAudit } = require(path.join(moduleDir, 'audit.cjs'));
+const { runImages } = require(path.join(moduleDir, 'images.cjs'));
+const { runQuality, runCompare } = require(path.join(moduleDir, 'quality.cjs'));
+const { runJobs } = require(path.join(moduleDir, 'jobs.cjs'));
+const { runReview } = require(path.join(moduleDir, 'review.cjs'));
 
 const COMMANDS = new Set(['doctor', 'probe', 'run', 'cleanup', 'self-test']);
+const DEFAULT_STEPS = ['extract', 'audit', 'generate', 'quality', 'compare', 'jobs', 'review'];
 const SECRET_KEY_PATTERN = /(api[_-]?key|token|cookie|password|passwd|secret|authorization|bearer|set-cookie|client[_-]?secret)/i;
 const SECRET_VALUE_PATTERNS = [
   /Bearer\s+[A-Za-z0-9._~+/=-]+/gi,
@@ -117,7 +124,7 @@ function help() {
     '  node scripts/i18n-workflow-cli.cjs cleanup <path> [path...]',
     '  node scripts/i18n-workflow-cli.cjs self-test',
     '',
-    'Commands print JSON to stdout. Legacy tool output is captured in JSON fields.',
+    'Commands print one JSON object to stdout for automation.',
   ].join('\n');
   process.stdout.write(`${text}\n`);
   return 0;
@@ -145,20 +152,13 @@ function doctor(args) {
   if (loaded.error !== undefined) return loaded.error;
   const config = loaded.config;
   const warnings = [];
-  const requiredScripts = [
-    'run-i18n-workflow.cjs',
-    'extract-hardcoded-text.cjs',
-    'audit-i18n-assets.cjs',
-    'generate-i18n-images.cjs',
-    'extract-i18n-regeneration-jobs.cjs',
-    'build-i18n-review-sheets.cjs',
-    'image-ops.py',
-  ];
-  const scripts = Object.fromEntries(requiredScripts.map(name => [name, fs.existsSync(path.join(toolsDir, name))]));
+  const cliModuleNames = ['common.cjs', 'extract.cjs', 'audit.cjs', 'images.cjs', 'quality.cjs', 'jobs.cjs', 'review.cjs', 'image_ops.py'];
+  const cliModules = Object.fromEntries(cliModuleNames.map(name => [name, fs.existsSync(path.join(moduleDir, name))]));
   const checks = {
     node: commandExists('node'),
     skillRoot,
-    toolsDirExists: fs.existsSync(toolsDir),
+    moduleDir,
+    cliModules,
     projectRootExists: Boolean(config.projectRoot && fs.existsSync(config.projectRoot)),
     assetsRootExists: Boolean(config.assetsRoot && fs.existsSync(config.assetsRoot)),
     resourcesRootExists: Boolean(config.resourcesRoot && fs.existsSync(config.resourcesRoot)),
@@ -168,17 +168,14 @@ function doctor(args) {
     fallbackChain: Array.isArray(config.fallbackChain) ? config.fallbackChain : [],
     getLocales: typeof config.getLocales === 'function',
     getSpriteFrameMap: typeof config.getSpriteFrameMap === 'function',
-    scripts,
   };
   if (!checks.node) warnings.push('node command was not detected');
+  if (!Object.values(cliModules).every(Boolean)) warnings.push('one or more CLI modules are missing');
   if (!checks.assetsRootExists) warnings.push('assetsRoot does not exist');
   if (!checks.resourcesRootExists) warnings.push('resourcesRoot does not exist');
   if (!checks.supportedLanguages.length) warnings.push('supportedLanguages is empty');
   if (!checks.baselineLanguage) warnings.push('baselineLanguage is not configured');
   if (!checks.fallbackChain.length) warnings.push('fallbackChain is empty');
-  for (const [name, exists] of Object.entries(scripts)) {
-    if (!exists) warnings.push(`missing legacy tool: ${name}`);
-  }
   return ok('doctor', { checks }, warnings);
 }
 
@@ -218,36 +215,56 @@ function probe(args) {
   }, warnings);
 }
 
-function run(args, rawArgs) {
+function stepsArg(args) {
+  const raw = args.steps ? String(args.steps) : DEFAULT_STEPS.join(',');
+  return raw.split(',').map(step => step.trim()).filter(Boolean);
+}
+
+function passThroughArgs(args) {
+  const out = [];
+  for (const [key, value] of Object.entries(args)) {
+    if (key === '_' || key === 'config' || key === 'steps' || key === 'dry-run' || key === 'fail-on') continue;
+    if (value === true) out.push(`--${key}`);
+    else out.push(`--${key}=${value}`);
+  }
+  return out;
+}
+
+async function run(args, rawArgs) {
   const loaded = loadConfigFor('run', args);
   if (loaded.error !== undefined) return loaded.error;
+  const config = loaded.config;
+  const warnings = [];
+  const steps = [];
+  const selectedSteps = stepsArg(args);
+  const passthrough = passThroughArgs(args);
+  const failOnError = args['fail-on'] === 'error';
 
-  const passThrough = [];
-  for (const [key, value] of Object.entries(args)) {
-    if (key === '_' || key === 'execute') continue;
-    if (key === 'config') {
-      passThrough.push(`--config=${path.resolve(String(value))}`);
-      continue;
+  async function executeStep(name, fn) {
+    const step = { name, skipped: false, result: null };
+    try {
+      step.result = await fn();
+    } catch (error) {
+      step.error = error.message;
+      steps.push(step);
+      if (failOnError) throw error;
+      return;
     }
-    if (value === true) passThrough.push(`--${key}`);
-    else passThrough.push(`--${key}=${value}`);
+    steps.push(step);
   }
-  if (args.execute) passThrough.push('--execute');
-  const script = path.join(toolsDir, 'run-i18n-workflow.cjs');
-  const result = spawnSync(process.execPath, [script, ...passThrough], {
-    cwd: loaded.config.projectRoot || process.cwd(),
-    encoding: 'utf8',
-    maxBuffer: 1024 * 1024 * 20,
-  });
-  const data = {
-    script,
-    args: redactArgs(rawArgs),
-    exitCode: result.status,
-    stdout: redactString(result.stdout || ''),
-    stderr: redactString(result.stderr || ''),
-  };
-  if (result.status === 0) return ok('run', data, []);
-  return fail('run', 'WORKFLOW_FAILED', 'i18n workflow command failed', data, result.status || 1);
+
+  try {
+    if (selectedSteps.includes('extract')) await executeStep('extract', () => runExtract(config));
+    if (selectedSteps.includes('audit')) await executeStep('audit', () => runAudit(config));
+    if (selectedSteps.includes('generate')) await executeStep('generate', () => runImages(config, args['dry-run'] ? passthrough : [...passthrough, '--generate', '--execute']));
+    if (selectedSteps.includes('quality')) await executeStep('quality', () => runQuality(config));
+    if (selectedSteps.includes('compare')) await executeStep('compare', () => runCompare(config));
+    if (selectedSteps.includes('jobs')) await executeStep('jobs', () => runJobs(config, passthrough));
+    if (selectedSteps.includes('review')) await executeStep('review', () => runReview(config, passthrough));
+  } catch (error) {
+    return fail('run', 'WORKFLOW_FAILED', 'i18n workflow command failed', { args: redactArgs(rawArgs), steps, error: error.message }, 1);
+  }
+  return ok('run', { args: redactArgs(rawArgs), steps }, warnings);
 }
 
 function cleanup(args) {
@@ -265,12 +282,8 @@ function cleanup(args) {
       continue;
     }
     try {
-      if (fs.existsSync(absolute)) {
-        fs.rmSync(absolute, { recursive: true, force: true });
-        removed.push(target);
-      } else {
-        removed.push(target);
-      }
+      if (fs.existsSync(absolute)) fs.rmSync(absolute, { recursive: true, force: true });
+      removed.push(target);
     } catch (error) {
       refused.push({ path: target, reason: error.message });
     }
@@ -279,42 +292,49 @@ function cleanup(args) {
   return ok('cleanup', { removed }, []);
 }
 
+function writeSelfTestConfig(tempRoot) {
+  const projectRoot = path.join(tempRoot, 'project');
+  const assetsRoot = path.join(projectRoot, 'assets');
+  const resourcesRoot = path.join(assetsRoot, 'resources');
+  const reportDirectory = path.join(projectRoot, 'tools', 'reports');
+  fs.mkdirSync(path.join(resourcesRoot, 'prefabs'), { recursive: true });
+  fs.mkdirSync(reportDirectory, { recursive: true });
+  const configPath = path.join(tempRoot, 'i18n-workflow.config.cjs');
+  fs.writeFileSync(configPath, [
+    'const path = require("path");',
+    `const projectRoot = ${JSON.stringify(projectRoot)};`,
+    'module.exports = {',
+    '  supportedLanguages: ["zh"],',
+    '  baselineLanguage: "zh",',
+    '  fallbackChain: ["zh"],',
+    '  runtimeLanguageDetector: "self-test",',
+    '  projectRoot,',
+    '  assetsRoot: path.join(projectRoot, "assets"),',
+    '  resourcesRoot: path.join(projectRoot, "assets", "resources"),',
+    '  reportDirectory: path.join(projectRoot, "tools", "reports"),',
+    '  getLocales() { return { zh: { "common.ok": "确定" } }; },',
+    '  enumerateSourceTextImages() { return []; },',
+    '  resolveTargetPath(sourceResourcesPath, language) { return `i18n_text_sprites/${language}/${sourceResourcesPath}`; },',
+    '  getSpriteFrameMap() { return {}; },',
+    '};',
+  ].join('\n'));
+  return { configPath };
+}
+
 function selfTest() {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'i18n-workflow-self-test-'));
   try {
-    const projectRoot = path.join(tempRoot, 'project');
-    const assetsRoot = path.join(projectRoot, 'assets');
-    const resourcesRoot = path.join(assetsRoot, 'resources');
-    const reportDirectory = path.join(projectRoot, 'tools', 'reports');
-    fs.mkdirSync(resourcesRoot, { recursive: true });
-    fs.mkdirSync(reportDirectory, { recursive: true });
-    const configPath = path.join(tempRoot, 'i18n-workflow.config.cjs');
-    fs.writeFileSync(configPath, [
-      'const path = require("path");',
-      `const projectRoot = ${JSON.stringify(projectRoot)};`,
-      'module.exports = {',
-      '  supportedLanguages: ["zh"],',
-      '  baselineLanguage: "zh",',
-      '  fallbackChain: ["zh"],',
-      '  runtimeLanguageDetector: "self-test",',
-      '  projectRoot,',
-      '  assetsRoot: path.join(projectRoot, "assets"),',
-      '  resourcesRoot: path.join(projectRoot, "assets", "resources"),',
-      '  reportDirectory: path.join(projectRoot, "tools", "reports"),',
-      '  getLocales() { return { zh: { "common.ok": "确定" } }; },',
-      '  enumerateSourceTextImages() { return []; },',
-      '  resolveTargetPath(sourceResourcesPath, language) { return `i18n_text_sprites/${language}/${sourceResourcesPath}`; },',
-      '  getSpriteFrameMap() { return {}; },',
-      '};',
-    ].join('\n'));
+    const { configPath } = writeSelfTestConfig(tempRoot);
     const doctorResult = spawnSync(process.execPath, [__filename, 'doctor', '--config', configPath], { encoding: 'utf8' });
     const probeResult = spawnSync(process.execPath, [__filename, 'probe', '--config', configPath], { encoding: 'utf8' });
+    const runResult = spawnSync(process.execPath, [__filename, 'run', '--config', configPath, '--steps', 'extract,audit,jobs,review', '--dry-run'], { encoding: 'utf8' });
     const cleanupTarget = path.join(tempRoot, 'cleanup-target.txt');
     fs.writeFileSync(cleanupTarget, 'x');
     const cleanupResult = spawnSync(process.execPath, [__filename, 'cleanup', cleanupTarget], { encoding: 'utf8' });
     const checks = {
       doctor: doctorResult.status === 0 && JSON.parse(doctorResult.stdout).ok === true,
       probe: probeResult.status === 0 && JSON.parse(probeResult.stdout).ok === true,
+      run: runResult.status === 0 && JSON.parse(runResult.stdout).ok === true,
       cleanup: cleanupResult.status === 0 && !fs.existsSync(cleanupTarget),
     };
     const allPass = Object.values(checks).every(Boolean);
@@ -325,7 +345,7 @@ function selfTest() {
   }
 }
 
-function main() {
+async function main() {
   const rawArgs = process.argv.slice(2);
   if (!rawArgs.length || rawArgs.includes('--help') || rawArgs.includes('-h')) return help();
   const args = parseArgs(rawArgs);
@@ -339,4 +359,8 @@ function main() {
   return fail(command, 'UNREACHABLE', 'unreachable command dispatch', undefined, 1);
 }
 
-process.exitCode = main();
+main().then(code => {
+  process.exitCode = code;
+}).catch(error => {
+  process.exitCode = fail('unknown', 'UNHANDLED', error.message, undefined, 1);
+});
