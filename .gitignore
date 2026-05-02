@@ -10,12 +10,19 @@ Thumbs.db
 node_modules/
 .pnpm-store/
 .yarn/
+.uv-cache/
+.cache/
 
 # Python caches and virtual environments
 __pycache__/
 *.py[cod]
 .venv/
 venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.tox/
 
 # Logs
 *.log
@@ -33,7 +40,23 @@ pnpm-debug.log*
 coverage/
 dist/
 build/
+htmlcov/
+.coverage
+coverage.xml
 **/tools/reports/
 **/.tmp-*/
 tmp/
 temp/
+
+# Browser automation and generated media artifacts
+playwright-report/
+test-results/
+*.trace.zip
+*.har
+*.webm
+*.mp4
+
+# Skill runtime artifacts
+**/*_assets/
+**/bilibili-BV*.html
+**/bilibili-BV*.png
