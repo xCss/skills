@@ -131,7 +131,7 @@ function loadSpriteFrameIndex(config, resourcesRelPrefix) {
     const meta = readJson(metaPath);
     if (!meta || !meta.subMetas) continue;
     const imagePath = metaPath.replace(/\.meta$/, '');
-    const imageRel = rel(imagePath);
+    const imageRel = rel(imagePath, config);
     const atlasSize = meta.size || {};
     for (const [name, subMeta] of Object.entries(meta.subMetas)) {
       if (!subMeta || !subMeta.uuid) continue;

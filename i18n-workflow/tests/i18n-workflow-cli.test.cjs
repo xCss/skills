@@ -23,6 +23,19 @@ function writeFixtureConfig() {
   const resourcesRoot = path.join(assetsRoot, 'resources');
   const reportDirectory = path.join(projectRoot, 'tools', 'reports');
   fs.mkdirSync(path.join(resourcesRoot, 'prefabs'), { recursive: true });
+  const imagePath = path.join(resourcesRoot, 'ui', 'button.png');
+  fs.mkdirSync(path.dirname(imagePath), { recursive: true });
+  fs.writeFileSync(imagePath, Buffer.from('not-a-real-png'));
+  fs.writeFileSync(`${imagePath}.meta`, JSON.stringify({
+    uuid: '11111111-1111-4111-8111-111111111111',
+    subMetas: {
+      button: {
+        uuid: '22222222-2222-4222-8222-222222222222',
+        rawWidth: 120,
+        rawHeight: 48,
+      },
+    },
+  }, null, 2));
   fs.mkdirSync(reportDirectory, { recursive: true });
   const configPath = path.join(tempRoot, 'i18n-workflow.config.cjs');
   fs.writeFileSync(configPath, [
@@ -78,6 +91,7 @@ test('run uses native CLI steps instead of spawning legacy workflow script', () 
     assert.strictEqual(payload.ok, true);
     assert.strictEqual(payload.command, 'run');
     assert.ok(Array.isArray(payload.data.steps));
+    assert.deepStrictEqual(payload.data.steps.map(step => step.error).filter(Boolean), []);
     assert.strictEqual(payload.data.script, undefined);
     assert.strictEqual(payload.data.stdout, undefined);
     assert.strictEqual(payload.data.stderr, undefined);
