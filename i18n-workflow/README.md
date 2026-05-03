@@ -113,7 +113,7 @@ For each target language needing a localized text image:
 - Preserve background, transparency, button/ribbon style.
 - Replace embedded text with the translated string.
 
-Model-backed classification and generation use `BASE_URL` and `API_KEY`. Requests run with concurrency 10 by default and can be capped with `--concurrency=<1-10>`.
+Model-backed classification and generation resolve provider settings from domain-specific env, shared `BASE_URL` / `API_KEY`, or Codex provider/base_url and auth files written by tools such as cc-switch. This follows the configured URL; it does not auto-discover a local `127.0.0.1:<port>` proxy. Requests run with concurrency 10 by default and can be capped with `--concurrency=<1-10>`.
 
 ### 4. Quality Audit
 

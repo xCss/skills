@@ -1,0 +1,12 @@
+[project]
+name = "imagegen-workflow"
+version = "0.1.0"
+description = "Stable CLI for reference-image generation and postprocessing workflows"
+requires-python = ">=3.11"
+dependencies = [
+  "pillow>=10.0.0",
+  "requests>=2.31.0",
+]
+
+[tool.uv]
+package = false

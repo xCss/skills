@@ -129,6 +129,40 @@
 
 详细示例见 [references/cli-output-contract.md](references/cli-output-contract.md)。
 
+## Provider / cc-switch 解析规范
+
+凡是自有 Skill + CLI 需要调用 OpenAI 或 Responses-compatible provider，必须由 CLI 或共享 helper 负责 provider 解析，不能让 agent 临场拼环境读取逻辑。
+
+推荐解析顺序：
+
+1. CLI 显式参数，例如 `--base-url`、`--api-key`、`--model`。
+2. 技能/领域专属环境变量，例如 `IMAGEGEN_BASE_URL`、`IMAGEGEN_API_KEY`、`I18N_CLASSIFY_BASE_URL`、`I18N_CLASSIFY_API_KEY`。
+3. 共享环境变量：`BASE_URL`、`API_KEY`。
+4. Codex provider 配置文件：如果设置了 `CODEX_HOME`，读取 `$CODEX_HOME/config.toml` 和 `$CODEX_HOME/auth.json`；否则读取 `~/.codex/config.toml` 和 `~/.codex/auth.json`。
+5. 安全 fallback：只允许模型名等非凭据默认值；缺少必要 provider 时返回 JSON 错误。
+
+Codex 配置读取规则：
+
+- 从 `config.toml` 读取顶层 `model_provider`，再读取 `[model_providers.<name>].base_url`。
+- 从 `auth.json` 读取 `OPENAI_API_KEY`。
+- 该机制用于跟随 cc-switch 当前写入的 Codex provider/base_url 配置；它不会自动发现或改写为本地 `127.0.0.1:<port>` 代理。不要调用 `cc-switch` 命令作为必需依赖，也不要生成一对一 wrapper。
+- `CODEX_HOME` 一旦设置，只读取该目录，不再隐式混读用户目录，便于测试和隔离。
+- `doctor` / `probe` 可报告 `hasBaseUrl`、`hasApiKey`、`model`、`source` 等非敏感字段；`source` 可使用 `args`、`specific-environment`、`environment`、`codex-config`、`mixed`、`none`。
+
+严禁输出 API key、完整 Authorization header、`auth.json` 原文、`.env` 内容或完整连接串。测试必须覆盖至少一个 Codex/cc-switch fallback 场景，并断言 stdout 不包含测试 key。
+
+## 模型识图 / 生图调用默认策略
+
+如果用户请求本身需要模型识图、图片理解、图片分类、图片生成、图片编辑或相关真实模型验证，视为用户已经允许必要的真实 provider/API 调用；不要再因为费用、额度或消耗而停下来二次确认。
+
+必须继续遵守：
+
+- 真实调用前优先使用稳定 CLI / workflow，不要临场拼一次性执行逻辑。
+- `doctor` / `probe` 可用于排查配置，但 `/models` 不可用不代表 `/responses` 不可用。
+- 明确区分 `dry-run`、mock 验证和真实 provider 调用，不能把 mock 结果汇报成真实模型验证。
+- 不输出 API key、Authorization header、`auth.json` 原文或 `.env` 内容。
+- 如果真实调用失败，返回或汇报 provider HTTP 状态、错误码、非敏感响应摘要和下一步诊断。
+
 ## Existing Skill Migration Assessment
 
 迁移旧 Skill 前必须先分类并打分。

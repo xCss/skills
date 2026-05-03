@@ -148,11 +148,12 @@ CLI 必须自己负责配置解析，不要让 agent 临时解析。
 
 推荐优先级：
 
-1. CLI 显式参数，例如 `--provider`。
-2. 技能专属配置，例如 `image_gen.provider`。
-3. 全局默认配置，例如 `model.provider`。
-4. 安全 fallback。
-5. 如果仍无法解析，返回 JSON 错误，不要猜。
+1. CLI 显式参数，例如 `--base-url`、`--api-key`、`--model`。
+2. 技能/领域专属环境变量或配置，例如 `IMAGEGEN_BASE_URL`、`IMAGEGEN_API_KEY`。
+3. 共享环境变量，例如 `BASE_URL`、`API_KEY`。
+4. Codex provider 配置文件：`$CODEX_HOME/config.toml` + `$CODEX_HOME/auth.json`，或未设置 `CODEX_HOME` 时的 `~/.codex/config.toml` + `~/.codex/auth.json`。这用于跟随 cc-switch 当前写入的 Codex provider/base_url 配置，不会自动发现或改写为本地 `127.0.0.1:<port>` 代理。
+5. 安全 fallback。
+6. 如果仍无法解析，返回 JSON 错误，不要猜。
 
 错误示例：
 
@@ -163,15 +164,26 @@ provider = config["image_gen"]["provider"]
 更好的做法：
 
 ```python
-if args.provider:
-    provider = args.provider
-elif image_provider_exists_and_has_base_url:
-    provider = image_provider
-elif model_provider_exists:
-    provider = model_provider
+if args.base_url and args.api_key:
+    provider = provider_from_args(args)
+elif skill_env_has_base_url_and_api_key:
+    provider = provider_from_skill_env()
+elif shared_env_has_base_url_and_api_key:
+    provider = provider_from_shared_env()
+elif codex_config_has_base_url_and_auth_key:
+    provider = provider_from_codex_config()
 else:
     return error("NO_PROVIDER_CONFIGURED")
 ```
+
+Codex 配置解析要求：
+
+- `CODEX_HOME` 设置时只读取该目录；未设置时读取用户目录 `~/.codex`。
+- `config.toml` 读取顶层 `model_provider` 和 `[model_providers.<name>].base_url`。
+- `auth.json` 读取 `OPENAI_API_KEY`。
+- `doctor` / `probe` 只报告 `hasBaseUrl`、`hasApiKey`、`model`、`source`；不要打印 key 或 `auth.json` 内容。
+
+如果用户请求需要模型识图、图片分类、图片生成、图片编辑或真实模型验证，默认允许必要的真实 provider/API 调用，不因费用或额度二次确认。仍需明确区分 mock、dry-run 和真实调用；真实失败时返回安全的 HTTP 状态、错误码和诊断摘要。
 
 ## doctor / probe / self-test
 

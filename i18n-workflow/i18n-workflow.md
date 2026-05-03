@@ -89,12 +89,12 @@ node skills/i18n-workflow/scripts/i18n-workflow-cli.cjs run --config tools/i18n-
 
 - `extract`：硬编码文本提取。
 - `audit`：资源 / sprite-frame / 本地化映射审计。
-- `generate`：manifest、分类和图片生成；真正调用 API 时需要 `--execute` 及 `BASE_URL` / `API_KEY`。
+- `generate`：manifest、分类和图片生成；真正调用 API 时需要 `--execute` 及可解析的 provider 配置。
 - `quality` / `compare`：生成图片规格与对比质量报告。
 - `jobs`：失败重生成任务。
 - `review`：人工复核材料。
 
-模型访问使用 `BASE_URL` 和 `API_KEY` 环境变量。分类和生成请求默认并发为 10，可用 `--concurrency=<1-10>` 调整。
+模型访问按顺序使用领域专属环境变量、共享 `BASE_URL` / `API_KEY`，或 cc-switch 写入的 Codex provider/base_url 与 auth 文件；不会自动发现本地 `127.0.0.1:<port>` 代理。分类和生成请求默认并发为 10，可用 `--concurrency=<1-10>` 调整。
 
 ## 执行原则
 

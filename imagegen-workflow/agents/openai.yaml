@@ -1,0 +1,4 @@
+interface:
+  display_name: "imagegen Workflow"
+  short_description: "Reference-image generation via JSON CLI"
+  default_prompt: "Use $imagegen-workflow to generate a localized replacement image from a source PNG with exact dimensions."

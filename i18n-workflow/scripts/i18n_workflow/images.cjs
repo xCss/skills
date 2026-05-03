@@ -3,9 +3,11 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const os = require('os');
 const { spawnSync } = require('child_process');
 
 const { targetLanguages: deriveTargetLanguages } = require('./common.cjs');
+const { resolveResponsesProvider, responsesEndpoint } = require('./provider.cjs');
 
 let config;
 let projectRoot;
@@ -251,7 +253,7 @@ function buildManifestFromAudit() {
     modelPlan: {
       classifier: process.env.I18N_CLASSIFY_MODEL || 'gpt-5.5',
       imageGenerator: process.env.I18N_IMAGE_MODEL || 'gpt-image-2',
-      api: 'OpenAI Responses API via BASE_URL/API_KEY',
+      api: 'OpenAI Responses API via explicit args, I18N_CLASSIFY_* env, BASE_URL/API_KEY, or Codex config/auth',
       instructions: [
         'Classify whether the source image contains embedded text that needs localization.',
         'Preserve original canvas width and height exactly for generated assets.',
@@ -302,16 +304,11 @@ async function runConcurrentJobs(items, args, runJob) {
   await Promise.all(Array.from({ length: concurrency }, worker));
 }
 
-function getResponsesEndpoint() {
-  const baseUrl = process.env.BASE_URL;
-  if (!baseUrl) throw new Error('BASE_URL is required for --execute.');
-  return `${baseUrl.replace(/\/+$/, '')}/responses`;
-}
-
-function getApiKey() {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) throw new Error('API_KEY is required for --execute.');
-  return apiKey;
+function classifyProvider() {
+  return resolveResponsesProvider({
+    prefix: 'I18N_CLASSIFY',
+    model: process.env.I18N_CLASSIFY_MODEL || 'gpt-5.5',
+  });
 }
 
 function imageDataUrl(sourceImagePath) {
@@ -339,10 +336,14 @@ function parseResponseText(text) {
 }
 
 async function responsesCreate(body) {
-  const response = await fetch(getResponsesEndpoint(), {
+  const provider = classifyProvider();
+  if (!provider.baseUrl || !provider.apiKey) {
+    throw new Error('Provider configuration is required for --execute. Set I18N_CLASSIFY_BASE_URL/I18N_CLASSIFY_API_KEY, BASE_URL/API_KEY, or Codex config/auth.');
+  }
+  const response = await fetch(responsesEndpoint(provider.baseUrl), {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${getApiKey()}`,
+      Authorization: `Bearer ${provider.apiKey}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body),
@@ -866,14 +867,63 @@ function generationGuidance(candidate, language) {
   ].join('\n');
 }
 
-async function generateWithModel(candidate, language, text) {
+function imagegenWorkflowCliPath() {
+  const configured = process.env.IMAGEGEN_WORKFLOW_CLI;
+  if (configured) return path.resolve(configured);
+  return path.resolve(__dirname, '..', '..', '..', 'imagegen-workflow', 'scripts', 'imagegen_workflow_cli.py');
+}
+
+function parseImagegenWorkflowOutput(result) {
+  try {
+    return JSON.parse(result.stdout || '{}');
+  } catch {
+    return null;
+  }
+}
+
+function imagegenWorkflowError(result, payload) {
+  if (payload && payload.error) {
+    const hint = payload.error.hint ? ` Hint: ${payload.error.hint}` : '';
+    return `${payload.error.code}: ${payload.error.message}${hint}`;
+  }
+  return (result.stderr || result.stdout || 'imagegen workflow CLI failed').slice(0, 1000);
+}
+
+function imagegenWorkflowEnv() {
+  return {
+    ...process.env,
+    UV_PROJECT_ENVIRONMENT: process.env.UV_PROJECT_ENVIRONMENT || path.join(os.tmpdir(), 'imagegen-workflow-venv'),
+    UV_LINK_MODE: process.env.UV_LINK_MODE || 'copy',
+  };
+}
+
+function runImagegenWorkflow(args) {
+  const cliPath = imagegenWorkflowCliPath();
+  if (!fs.existsSync(cliPath)) {
+    throw new Error(`imagegen-workflow CLI not found at ${cliPath}. Install the imagegen-workflow skill or set IMAGEGEN_WORKFLOW_CLI.`);
+  }
+  const result = spawnSync('uv', ['run', 'python', cliPath, ...args], {
+    cwd: path.resolve(cliPath, '..', '..'),
+    env: imagegenWorkflowEnv(),
+    encoding: 'utf8',
+  });
+  const payload = parseImagegenWorkflowOutput(result);
+  if (result.status !== 0 || !payload || !payload.ok) {
+    throw new Error(imagegenWorkflowError(result, payload));
+  }
+  return payload;
+}
+
+function runImagegenWorkflowGenerate(candidate, language, text) {
   const extraGuidance = generationGuidance(candidate, language);
-  const prompt = [
-    `Create a ${language} localized replacement for this Cocos Creator UI image.`,
-    `Use this exact text: ${text}`,
-    `Output a PNG with exactly ${candidate.width}x${candidate.height} pixels.`,
-    'Use the source image as the visual specification. Match the source canvas size, text bounding box, font weight, stroke/outline thickness, shadow, alignment, padding, and overall text scale.',
-    'Remove the original Chinese text before drawing the localized text, but keep the same non-text background, button, ribbon, glow, and transparent areas.',
+  const tempDir = path.join(projectRoot, 'tools', 'reports', '.tmp-i18n-images');
+  fs.mkdirSync(tempDir, { recursive: true });
+  const token = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const outputPath = path.join(tempDir, `${token}-imagegen-workflow.png`);
+  const guidancePath = path.join(tempDir, `${token}-imagegen-guidance.txt`);
+  const guidance = [
+    'i18n-workflow context: the source image is a Cocos Creator UI asset.',
+    'Remove the original Chinese/source-language text before drawing the localized text, but keep the same non-text background, button, ribbon, glow, and transparent areas.',
     'The localized text should be about the same visual height as the Chinese text in the source image. Do not make it smaller just because the translated phrase is longer.',
     'If the translation is longer, use a condensed font, tighter tracking, or multiple lines while preserving the original text area and readable size.',
     'Do not render tiny text centered on a large empty bar. Do not crop or change the image resolution.',
@@ -882,20 +932,64 @@ async function generateWithModel(candidate, language, text) {
     candidate.generationHint ? `Project-specific visual instruction: ${candidate.generationHint}` : '',
     extraGuidance || '',
   ].filter(Boolean).join('\n');
+  fs.writeFileSync(guidancePath, guidance, 'utf8');
 
-  const response = await responsesCreate({
-    model: process.env.I18N_IMAGE_MODEL || 'gpt-image-2',
-    input: [{
-      role: 'user',
-      content: [
-        { type: 'input_text', text: prompt },
-        { type: 'input_image', image_url: imageDataUrl(candidate.sourceImagePath) },
-      ],
-    }],
-  });
-  const base64 = extractImageBase64(response);
-  if (!base64) throw new Error('No generated image base64 found in model response.');
-  return Buffer.from(base64, 'base64');
+  try {
+    runImagegenWorkflow([
+    'generate',
+    '--source', path.join(projectRoot, candidate.sourceImagePath),
+    '--text', text,
+    '--language', language,
+    '--width', String(candidate.width),
+    '--height', String(candidate.height),
+    '--out', outputPath,
+    '--model', process.env.I18N_IMAGE_MODEL || 'gpt-image-2',
+    '--guidance-file', guidancePath,
+    '--execute',
+    ]);
+    const buffer = fs.readFileSync(outputPath);
+    fs.rmSync(outputPath, { force: true });
+    return buffer;
+  } finally {
+    fs.rmSync(guidancePath, { force: true });
+    fs.rmSync(outputPath, { force: true });
+  }
+}
+
+function runImagegenWorkflowPostprocess(buffer, candidate) {
+  const tempDir = path.join(projectRoot, 'tools', 'reports', '.tmp-i18n-images');
+  fs.mkdirSync(tempDir, { recursive: true });
+  const token = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const generatedPath = path.join(tempDir, `${token}-postprocess-input.png`);
+  const outputPath = path.join(tempDir, `${token}-postprocess-output.png`);
+  const specPath = candidate.textComposite ? path.join(tempDir, `${token}-postprocess-spec.json`) : null;
+  fs.writeFileSync(generatedPath, buffer);
+  if (specPath) fs.writeFileSync(specPath, `${JSON.stringify(candidate.textComposite || {}, null, 2)}\n`);
+
+  const args = [
+    'postprocess',
+    '--generated', generatedPath,
+    '--source', path.join(projectRoot, candidate.sourceImagePath),
+    '--width', String(candidate.width),
+    '--height', String(candidate.height),
+    '--out', outputPath,
+  ];
+  if (specPath) args.push('--text-composite-spec', specPath);
+  if (candidate.preserveSourceAlpha) args.push('--preserve-source-alpha');
+  if (candidate.transparentEdgeBackground) args.push('--transparent-edge-background');
+
+  try {
+    runImagegenWorkflow(args);
+    return fs.readFileSync(outputPath);
+  } finally {
+    fs.rmSync(generatedPath, { force: true });
+    fs.rmSync(outputPath, { force: true });
+    if (specPath) fs.rmSync(specPath, { force: true });
+  }
+}
+
+async function generateWithModel(candidate, language, text) {
+  return runImagegenWorkflowGenerate(candidate, language, text);
 }
 
 function translationKey(candidate) {
@@ -1025,16 +1119,7 @@ async function runGenerate(args) {
         ? renderWithWorkflowRenderer(candidate, language, target.proposedText)
         : await generateWithModel(candidate, language, target.proposedText);
       try {
-        buffer = normalizeGeneratedPng(buffer, candidate);
-        if (candidate.textComposite) {
-          buffer = compositeGeneratedTextWithSource(buffer, candidate);
-        }
-        if (candidate.preserveSourceAlpha) {
-          buffer = preserveSourceAlphaWithUv(buffer, candidate);
-        }
-        if (candidate.transparentEdgeBackground) {
-          buffer = removeEdgeBackgroundWithUv(buffer);
-        }
+        buffer = runImagegenWorkflowPostprocess(buffer, candidate);
       } catch (error) {
         target.status = 'rejected_postprocess';
         target.outputBytes = buffer.length;

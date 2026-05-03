@@ -1,8 +1,6 @@
 ---
 name: i18n-workflow
 description: Use when a game project needs multilingual text, locale coverage auditing, localized text-image assets, i18n regression checks, or repeatable language launch workflows.
-version: 1.0.0
-author: Hermes Agent
 license: MIT
 metadata:
   hermes:

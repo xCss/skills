@@ -1,5 +1,6 @@
 const assert = require('assert');
 const fs = require('fs');
+const http = require('http');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
@@ -56,7 +57,28 @@ function writeFixtureConfig() {
     '  getSpriteFrameMap() { return {}; },',
     '};',
   ].join('\n'));
-  return { tempRoot, configPath };
+  return { tempRoot, configPath, projectRoot, assetsRoot, resourcesRoot, reportDirectory, imagePath };
+}
+
+function toPosix(filePath) {
+  return filePath.split(path.sep).join('/');
+}
+
+function withEnv(nextEnv, fn) {
+  const previous = {};
+  for (const key of Object.keys(nextEnv)) {
+    previous[key] = process.env[key];
+    if (nextEnv[key] === undefined) delete process.env[key];
+    else process.env[key] = nextEnv[key];
+  }
+  return Promise.resolve()
+    .then(fn)
+    .finally(() => {
+      for (const key of Object.keys(nextEnv)) {
+        if (previous[key] === undefined) delete process.env[key];
+        else process.env[key] = previous[key];
+      }
+    });
 }
 
 test('help describes canonical CLI without legacy tool routing', () => {
@@ -102,4 +124,136 @@ test('run uses native CLI steps instead of spawning legacy workflow script', () 
 
 test('legacy tools directory is not kept as an execution surface', () => {
   assert.strictEqual(fs.existsSync(path.join(root, 'tools')), false);
+});
+
+test('model-backed image generation is routed through imagegen workflow CLI', () => {
+  const imagesModule = fs.readFileSync(path.join(root, 'scripts', 'i18n_workflow', 'images.cjs'), 'utf8');
+  assert.match(imagesModule, /imagegen_workflow_cli\.py/);
+  assert.match(imagesModule, /runImagegenWorkflowGenerate/);
+  assert.match(imagesModule, /runImagegenWorkflowPostprocess/);
+});
+
+test('probe resolves classification provider from Codex config without printing secrets', () => {
+  const fixture = writeFixtureConfig();
+  const codexHome = path.join(fixture.tempRoot, '.codex');
+  try {
+    fs.mkdirSync(codexHome, { recursive: true });
+    fs.writeFileSync(path.join(codexHome, 'config.toml'), [
+      'model_provider = "OpenAI"',
+      '',
+      '[model_providers.OpenAI]',
+      'base_url = "https://ai.input.im"',
+      'wire_api = "responses"',
+      'requires_openai_auth = true',
+      '',
+    ].join('\n'));
+    fs.writeFileSync(path.join(codexHome, 'auth.json'), `${JSON.stringify({
+      OPENAI_API_KEY: 'TEST_ONLY_I18N_PROBE_CODEX_KEY',
+    }, null, 2)}\n`);
+    const result = runCli(['probe', '--config', fixture.configPath], {
+      env: {
+        ...process.env,
+        BASE_URL: '',
+        API_KEY: '',
+        I18N_CLASSIFY_BASE_URL: '',
+        I18N_CLASSIFY_API_KEY: '',
+        CODEX_HOME: codexHome,
+      },
+    });
+    assert.strictEqual(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.strictEqual(payload.ok, true);
+    assert.strictEqual(payload.command, 'probe');
+    assert.strictEqual(payload.data.hasApiEnvironment, true);
+    assert.strictEqual(payload.data.provider.classify.hasBaseUrl, true);
+    assert.strictEqual(payload.data.provider.classify.hasApiKey, true);
+    assert.strictEqual(payload.data.provider.classify.source, 'codex-config');
+    assert.doesNotMatch(result.stdout, /TEST_ONLY_I18N_PROBE_CODEX_KEY/);
+  } finally {
+    fs.rmSync(fixture.tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('model-backed image classification resolves provider from Codex config and auth', async () => {
+  const fixture = writeFixtureConfig();
+  const codexHome = path.join(fixture.tempRoot, '.codex');
+  const { runImages } = require(path.join(root, 'scripts', 'i18n_workflow', 'images.cjs'));
+  let requestCount = 0;
+  const server = http.createServer((req, res) => {
+    if (req.url === '/v1/responses') {
+      requestCount += 1;
+      assert.strictEqual(req.headers.authorization, 'Bearer TEST_ONLY_I18N_CLASSIFY_CODEX_KEY');
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        const payload = JSON.parse(body);
+        assert.strictEqual(payload.model, 'gpt-5.5');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          output: [{
+            content: [{
+              text: JSON.stringify({
+                hasText: false,
+                embeddedText: null,
+                semanticMeaning: 'decorative button',
+                localizedText: { en: null },
+                confidence: 0.91,
+                reason: 'mock classification',
+              }),
+            }],
+          }],
+        }));
+      });
+      return;
+    }
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end('{}');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const originalLog = console.log;
+  try {
+    const sourceImagePath = toPosix(path.relative(fixture.projectRoot, fixture.imagePath));
+    fs.writeFileSync(path.join(fixture.reportDirectory, 'i18n-asset-audit.json'), `${JSON.stringify({
+      textImageCandidatesWithoutI18nMap: [{
+        spriteFrameUuid: '22222222-2222-4222-8222-222222222222',
+        sourceImagePath,
+        resourcesPath: 'ui/button',
+        width: 120,
+        height: 48,
+        fileSize: 18,
+      }],
+    }, null, 2)}\n`);
+    fs.mkdirSync(codexHome, { recursive: true });
+    fs.writeFileSync(path.join(codexHome, 'config.toml'), [
+      'model_provider = "OpenAI"',
+      '',
+      '[model_providers.OpenAI]',
+      `base_url = "http://127.0.0.1:${server.address().port}/v1"`,
+      'wire_api = "responses"',
+      'requires_openai_auth = true',
+      '',
+    ].join('\n'));
+    fs.writeFileSync(path.join(codexHome, 'auth.json'), `${JSON.stringify({
+      OPENAI_API_KEY: 'TEST_ONLY_I18N_CLASSIFY_CODEX_KEY',
+    }, null, 2)}\n`);
+
+    const config = require(fixture.configPath);
+    console.log = () => {};
+    await withEnv({
+      BASE_URL: '',
+      API_KEY: '',
+      I18N_CLASSIFY_BASE_URL: '',
+      I18N_CLASSIFY_API_KEY: '',
+      CODEX_HOME: codexHome,
+    }, () => runImages(config, ['--classify', '--execute', '--limit=1', '--concurrency=1']));
+    console.log = originalLog;
+
+    const manifest = JSON.parse(fs.readFileSync(path.join(fixture.reportDirectory, 'i18n-image-manifest.json'), 'utf8'));
+    assert.strictEqual(requestCount, 1);
+    assert.strictEqual(manifest.candidates[0].detectionStatus, 'non_text');
+  } finally {
+    console.log = originalLog;
+    await new Promise(resolve => server.close(resolve));
+    fs.rmSync(fixture.tempRoot, { recursive: true, force: true });
+  }
 });

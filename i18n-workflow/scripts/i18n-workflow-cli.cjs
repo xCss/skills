@@ -14,6 +14,7 @@ const { runImages } = require(path.join(moduleDir, 'images.cjs'));
 const { runQuality, runCompare } = require(path.join(moduleDir, 'quality.cjs'));
 const { runJobs } = require(path.join(moduleDir, 'jobs.cjs'));
 const { runReview } = require(path.join(moduleDir, 'review.cjs'));
+const { resolveResponsesProvider } = require(path.join(moduleDir, 'provider.cjs'));
 
 const COMMANDS = new Set(['doctor', 'probe', 'run', 'cleanup', 'self-test']);
 const DEFAULT_STEPS = ['extract', 'audit', 'generate', 'quality', 'compare', 'jobs', 'review'];
@@ -152,7 +153,7 @@ function doctor(args) {
   if (loaded.error !== undefined) return loaded.error;
   const config = loaded.config;
   const warnings = [];
-  const cliModuleNames = ['common.cjs', 'extract.cjs', 'audit.cjs', 'images.cjs', 'quality.cjs', 'jobs.cjs', 'review.cjs', 'image_ops.py'];
+  const cliModuleNames = ['common.cjs', 'provider.cjs', 'extract.cjs', 'audit.cjs', 'images.cjs', 'quality.cjs', 'jobs.cjs', 'review.cjs', 'image_ops.py'];
   const cliModules = Object.fromEntries(cliModuleNames.map(name => [name, fs.existsSync(path.join(moduleDir, name))]));
   const checks = {
     node: commandExists('node'),
@@ -206,11 +207,24 @@ function probe(args) {
     warnings.push(`getLocales failed: ${error.message}`);
   }
 
+  const classifyProvider = resolveResponsesProvider({
+    prefix: 'I18N_CLASSIFY',
+    model: process.env.I18N_CLASSIFY_MODEL || 'gpt-5.5',
+  });
+
   return ok('probe', {
     reportDirectory,
     reportDirectoryWritable,
     localeLanguages,
-    hasApiEnvironment: Boolean(process.env.BASE_URL && process.env.API_KEY),
+    hasApiEnvironment: Boolean(classifyProvider.baseUrl && classifyProvider.apiKey),
+    provider: {
+      classify: {
+        hasBaseUrl: classifyProvider.hasBaseUrl,
+        hasApiKey: classifyProvider.hasApiKey,
+        model: classifyProvider.model,
+        source: classifyProvider.source,
+      },
+    },
     uvAvailable: commandExists('uv'),
   }, warnings);
 }
