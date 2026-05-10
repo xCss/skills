@@ -14,6 +14,10 @@ metadata:
 
 This skill routes game localization work through a stable CLI instead of ad-hoc scripts. Use the skill for judgment, workflow selection, fallback policy, and review requirements; use the CLI for repeatable execution and JSON output.
 
+Translation quality rule: keep translations as short and accurate as possible without losing the original meaning, while still sounding natural in the target language.
+
+Localized text-image rule: model output is only the first draft. Before accepting it, post-process and visually verify alpha edges, white/gray fringes, source-language residue, canvas fit, and UI-state coverage.
+
 The current-worktree boundary is strict: audits describe files that exist now. Do not infer supported languages or localized assets from Git history, deleted files, old branches, or planned work unless the user explicitly asks for a history/regression audit.
 
 ## When to Use
@@ -41,6 +45,8 @@ Primary command from this skill directory:
 node scripts/i18n-workflow-cli.cjs --help
 ```
 
+If the skill was copied/installed during the current agent session but cannot be hot-loaded, run the CLI directly from the copied skill path or a temporary checkout. The CLI does not require the skill body to be loaded. Use an absolute `--config` when the current working directory is not the user project root.
+
 Required health checks:
 
 ```bash
@@ -64,9 +70,11 @@ The agent should call this CLI instead of writing temporary Node, Python, or she
 2. Run `doctor` before assuming a project is bound to the workflow.
 3. Run `probe` before expensive or multi-step work.
 4. Use `run` for workflow stages; pass `--steps` to limit scope.
-5. Use existing report JSON from the configured `reportDirectory` for conclusions.
+5. Use existing report JSON from the configured `reportDirectory` for conclusions. After `extract`, inspect `runtimeKeyCoverage`; after `audit`, report exact `textImageCandidatesWithoutI18nMap` candidates, not only counts.
 6. Use `cleanup` only for explicit temporary paths.
 7. For API-backed image generation, explain that `--execute` consumes API calls before running it.
+8. For generated text-images, run a retry loop before acceptance: generate -> normalize/crop to the source canvas -> clean alpha/white/gray fringe artifacts -> inspect source/target contact sheet -> regenerate or patch failures.
+9. For runtime UI, verify language coverage in every visible state, not just the default state: hidden labels, off/on toggles, popups, buttons, and embedded-text sprites must all be checked in-game.
 
 Migration rationale and the complete CLI boundary are recorded in [references/migration-assessment.md](references/migration-assessment.md). Provider and credential handling for image generation are documented in [references/provider-resolution.md](references/provider-resolution.md).
 
@@ -77,10 +85,22 @@ Migration rationale and the complete CLI boundary are recorded in [references/mi
 | “检查配置 / 能不能跑” | `doctor` then `probe` |
 | “跑 i18n 审计” | `run --steps extract,audit --dry-run` |
 | “提取硬编码文本” | `run --steps extract --dry-run` |
+| “检查 Cocos prefab key 覆盖” | configure `sourceTextToKey`/`getRuntimeTextKeyMap`, then `run --steps extract --dry-run` |
 | “生成复核表” | `run --steps review --dry-run` |
 | “提取失败重生成任务” | `run --steps jobs --dry-run` |
 | “新增语言” | update project config/runtime, then `run --steps extract,audit,generate,jobs,review` |
+| “模型图有白边/残影/裁切” | post-process generated assets, then rerun `run --steps audit,jobs,review --dry-run` and visual review |
 | “清理临时文件” | `cleanup <path>` |
+
+## Text-Image Generation Gate
+
+When using a model-backed image skill/provider for localized sprites:
+
+- Respect user constraints such as provider/model, concurrency, quality range, and allowed dimension tolerance. If unspecified, prefer exact source dimensions; if the provider returns drifted dimensions, crop/pad/scale locally back to the source canvas before integration.
+- Keep generation concurrency within the configured cap. A user cap such as `10` is a maximum, not permission to exceed provider limits.
+- Treat provider failure, malformed output, wrong background, white square backgrounds, clipped alpha, or wrong dimensions as retryable job failures.
+- Do not accept assets with visible white/gray fringe, source-language residue, ghost text, clipped strokes, or unexpected decoration. Clean edge pixels and alpha first; regenerate when cleanup would damage the artwork.
+- Build a side-by-side/contact-sheet review for source plus every target language before claiming image coverage.
 
 ## Output Contract
 
@@ -117,6 +137,10 @@ Never print API keys, tokens, cookies, passwords, full Authorization headers, or
 - Do not add `en`, `ar`, `vi`, or any language to `supportedLanguages` unless the current worktree actually ships that language.
 - Do not use Git history to fill current-worktree audits unless the user requested a historical audit.
 - Do not make the agent reconstruct locale coverage or image manifests manually when the CLI can run the workflow.
+- Do not accept synthetic extracted keys as final runtime keys when the project has canonical runtime keys; bind `sourceTextToKey` or `getRuntimeTextKeyMap` and review `runtimeKeyCoverage.missing`.
+- Do not summarize image localization as a count only; list candidates from `candidateReport` or `i18n-asset-audit.json` that need human decision.
+- Do not treat model-generated images as final just because the file exists; inspect alpha, white/gray edges, residue, style drift, and actual runtime state.
+- Do not leave source-language UI labels hidden under sprites or inside off/on toggle tracks; remove, hide, or map them deliberately and verify in the running UI.
 - Do not mix debug noise into stdout; the CLI must keep stdout machine-readable JSON.
 - Do not recreate deleted skill-level `tools/*.cjs` entry points; `scripts/i18n-workflow-cli.cjs` is the only supported execution surface.
 - Project-local paths such as `tools/i18n-workflow.config.cjs` and `tools/reports/` are user-project configuration/report locations, not skill implementation tools.

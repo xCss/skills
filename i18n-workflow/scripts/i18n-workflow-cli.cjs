@@ -244,6 +244,43 @@ function passThroughArgs(args) {
   return out;
 }
 
+function reportFailures(config) {
+  const failures = [];
+  const hardcodedPath = path.join(config.reportDirectory, 'i18n-hardcoded-text-audit.json');
+  if (fs.existsSync(hardcodedPath)) {
+    const report = JSON.parse(fs.readFileSync(hardcodedPath, 'utf8'));
+    const missing = report.runtimeKeyCoverage && Array.isArray(report.runtimeKeyCoverage.missing) ? report.runtimeKeyCoverage.missing : [];
+    if (missing.length) failures.push({ report: 'i18n-hardcoded-text-audit.json', code: 'runtime_key_missing', count: missing.length, items: missing.slice(0, 20) });
+  }
+
+  const manifestPath = path.join(config.reportDirectory, 'i18n-image-manifest.json');
+  if (fs.existsSync(manifestPath)) {
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    const generationFailures = [];
+    for (const candidate of manifest.candidates || []) {
+      for (const [language, target] of Object.entries(candidate.targets || {})) {
+        if (target && target.status === 'generation_failed') {
+          const note = (candidate.notes || []).find(item => item.type === 'generation_failed' && item.language === language);
+          generationFailures.push({
+            sourceImagePath: candidate.sourceImagePath,
+            language,
+            resourcesPath: target.resourcesPath || null,
+            message: note ? note.message : null,
+          });
+        }
+      }
+    }
+    if (generationFailures.length) failures.push({ report: 'i18n-image-manifest.json', code: 'image_generation_failed', count: generationFailures.length, items: generationFailures.slice(0, 20) });
+  }
+
+  const jobsPath = path.join(config.reportDirectory, 'i18n-regenerate-quality-jobs.json');
+  if (fs.existsSync(jobsPath)) {
+    const jobs = JSON.parse(fs.readFileSync(jobsPath, 'utf8'));
+    if (Array.isArray(jobs) && jobs.length) failures.push({ report: 'i18n-regenerate-quality-jobs.json', code: 'regeneration_jobs_pending', count: jobs.length, items: jobs.slice(0, 20) });
+  }
+  return failures;
+}
+
 async function run(args, rawArgs) {
   const loaded = loadConfigFor('run', args);
   if (loaded.error !== undefined) return loaded.error;
@@ -277,6 +314,10 @@ async function run(args, rawArgs) {
     if (selectedSteps.includes('review')) await executeStep('review', () => runReview(config, passthrough));
   } catch (error) {
     return fail('run', 'WORKFLOW_FAILED', 'i18n workflow command failed', { args: redactArgs(rawArgs), steps, error: error.message }, 1);
+  }
+  if (failOnError) {
+    const failures = reportFailures(config);
+    if (failures.length) return fail('run', 'WORKFLOW_FAILED', 'i18n workflow reports contain blocking failures', { args: redactArgs(rawArgs), steps, failures }, 1);
   }
   return ok('run', { args: redactArgs(rawArgs), steps }, warnings);
 }

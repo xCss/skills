@@ -118,6 +118,16 @@ function parseSpriteFrameMap(config, targetLanguages) {
   return parseSpriteFrameMapFromSource(config, targetLanguages);
 }
 
+function pngDimensions(filePath) {
+  try {
+    const buffer = fs.readFileSync(filePath);
+    if (buffer.length < 24 || buffer.toString('ascii', 1, 4) !== 'PNG') return null;
+    return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
+  } catch {
+    return null;
+  }
+}
+
 function loadSpriteFrameIndex(config, resourcesRelPrefix) {
   const index = new Map();
   const textureMetas = walk(config.assetsRoot, filePath => {
@@ -133,6 +143,7 @@ function loadSpriteFrameIndex(config, resourcesRelPrefix) {
     const imagePath = metaPath.replace(/\.meta$/, '');
     const imageRel = rel(imagePath, config);
     const atlasSize = meta.size || {};
+    const imageDimensions = pngDimensions(imagePath) || {};
     for (const [name, subMeta] of Object.entries(meta.subMetas)) {
       if (!subMeta || !subMeta.uuid) continue;
       const record = {
@@ -144,8 +155,8 @@ function loadSpriteFrameIndex(config, resourcesRelPrefix) {
         resourcesPath: imageRel.startsWith(resourcesRelPrefix)
           ? imageRel.slice(resourcesRelPrefix.length).replace(/\.(png|jpg|jpeg|webp)$/i, '')
           : null,
-        width: subMeta.rawWidth || subMeta.width || meta.width || atlasSize.width || null,
-        height: subMeta.rawHeight || subMeta.height || meta.height || atlasSize.height || null,
+        width: subMeta.rawWidth || subMeta.width || meta.width || atlasSize.width || imageDimensions.width || null,
+        height: subMeta.rawHeight || subMeta.height || meta.height || atlasSize.height || imageDimensions.height || null,
         fileSize: fs.existsSync(imagePath) ? fs.statSync(imagePath).size : null,
       };
       index.set(subMeta.uuid, record);
@@ -333,6 +344,17 @@ function resolveRoot(root, config) {
   return path.isAbsolute(root) ? root : path.join(config.projectRoot, root);
 }
 
+function compactCandidates(candidates, limit = 20) {
+  return candidates.slice(0, limit).map(candidate => ({
+    spriteFrameUuid: candidate.spriteFrameUuid,
+    sourceImagePath: candidate.sourceImagePath,
+    resourcesPath: candidate.resourcesPath,
+    width: candidate.width,
+    height: candidate.height,
+    fileSize: candidate.fileSize,
+  }));
+}
+
 function configuredRoots(values, fallback, config) {
   const roots = Array.isArray(values) && values.length ? values : fallback;
   return roots.map(root => resolveRoot(root, config));
@@ -409,7 +431,14 @@ function runAudit(config) {
   fs.mkdirSync(outputDir, { recursive: true });
   fs.writeFileSync(outputPath, `${JSON.stringify(report, null, 2)}\n`);
 
-  return { summary: report.summary, outputPath: rel(outputPath, config) };
+  return {
+    summary: report.summary,
+    outputPath: rel(outputPath, config),
+    candidateReport: {
+      textImageCandidatesWithoutI18nMap: compactCandidates(i18n.missingMapCandidates),
+      total: i18n.missingMapCandidates.length,
+    },
+  };
 }
 
 module.exports = { runAudit };

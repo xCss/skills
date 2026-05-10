@@ -20,6 +20,14 @@ module.exports = {
   // Returns an object { [lang]: { [key]: string } }
   getLocales: () => ({}),
 
+  // --- Runtime Text-Key Mapping (optional) ---
+  // Maps extracted source UI text to the canonical runtime key.
+  // Used to keep Cocos prefab extraction aligned with runtime I18nSourceTextToKey-style maps.
+  sourceTextToKey: (text, context) => null,
+
+  // Returns { [sourceText]: canonicalKey } for coverage reporting.
+  getRuntimeTextKeyMap: () => ({}),
+
   // --- Text-Image Source ---
   // Returns an array of { imagePath, width, height, spriteFrameUuid, resourcesPath }
   enumerateSourceTextImages: () => [],
@@ -51,9 +59,50 @@ Shared across quality audit, comparison audit, and regeneration jobs.
 | `text_overflow` | Translated text exceeds the source bounding box. |
 | `low_contrast` | Text contrast is below the readability threshold. |
 | `compare_outlier` | Visual comparison score exceeds the acceptable delta. |
+| `provider_failure` | Image generation provider failed or returned no usable output. |
+| `malformed_generation` | Generated file is corrupt, empty, or not an image. |
+| `canvas_drift` | Raw generation differs from the source canvas beyond configured tolerance. |
+| `alpha_artifact` | Transparency was lost, clipped, or filled unexpectedly. |
+| `white_fringe` | White/gray edge halo or square background remains after generation. |
+| `source_text_residue` | Source-language ghost text or residue remains visible. |
+| `style_drift` | Text, stroke, shadow, background, or decoration no longer matches source style. |
+| `runtime_state_gap` | A localized asset/text path works in one UI state but not another runtime state. |
 | `missing_sprite_map` | Sprite-frame UUID has no mapping for the language. |
 | `missing_meta` | Target image exists but has no `.meta` sidecar. |
 | `fallback_missing` | The key/resource is missing in all fallback-chain languages. |
+
+## Hardcoded Text Audit Report Schema
+
+```jsonc
+{
+  "generatedAt": "ISO-8601",
+  "baselineLanguage": "zh",
+  "summary": {
+    "prefabFiles": 9,
+    "extractedTexts": 14,
+    "runtimeKeyMappedTexts": 14,
+    "runtimeKeyMissingTexts": 0
+  },
+  "items": [
+    {
+      "file": "assets/Bundles/UI/HomePage.prefab",
+      "componentId": 6,
+      "text": "开始游戏",
+      "key": "ui.start_game",
+      "fallbackKey": "homepage.start_game",
+      "keySource": "config.sourceTextToKey | config.getCanonicalTextKey | config.getRuntimeTextKeyMap | semantic | synthetic",
+      "type": "cc.Label"
+    }
+  ],
+  "runtimeKeyCoverage": {
+    "mapped": [/* items with runtime/canonical keys */],
+    "missing": [/* source texts requiring runtime key mapping */]
+  },
+  "localeSeed": { "zh": { "ui.start_game": "开始游戏" } }
+}
+```
+
+Treat `runtimeKeyCoverage.missing` as a required review item when the project uses runtime source-text-to-key localization.
 
 ## Manifest Schema
 
@@ -124,6 +173,7 @@ Shared across quality audit, comparison audit, and regeneration jobs.
       "actualWidth": 200,
       "actualHeight": 80,
       "fileSize": 12345,
+      "alphaPreserved": true,
       "problems": ["size_mismatch"],
       "pass": false
     }
@@ -143,6 +193,7 @@ Shared across quality audit, comparison audit, and regeneration jobs.
       "sourceImagePath": "path",
       "targetImagePath": "path",
       "compareScore": 0.12,
+      "visualFindings": ["no_source_text_residue", "no_white_fringe"],
       "problems": [],
       "pass": true
     }
@@ -161,6 +212,7 @@ Shared across quality audit, comparison audit, and regeneration jobs.
     "targetImagePath": "path",
     "expectedWidth": 200,
     "expectedHeight": 80,
+    "attempt": 2,
     "reason": "size_mismatch",
     "severity": "error",
     "suggestedAction": "regenerate at correct dimensions"

@@ -91,6 +91,9 @@ function parseArgs(argv) {
 }
 
 function targetPathFor(sourceResourcesPath, language) {
+  if (typeof config.resolveTargetPath === 'function') {
+    return config.resolveTargetPath(sourceResourcesPath, language);
+  }
   return `i18n_text_sprites/${language}/${sourceResourcesPath}`;
 }
 
@@ -173,12 +176,12 @@ function mergeConfigEnumeratedTextImages(manifest) {
     if (source.hasText !== false) candidate.detectionStatus = 'text';
     candidate.embeddedText = source.embeddedText || candidate.embeddedText || null;
     candidate.semanticMeaning = source.semanticMeaning || candidate.semanticMeaning || null;
-    candidate.generationHint = source.generationHint || candidate.generationHint || null;
-    candidate.renderMode = source.renderMode || candidate.renderMode || null;
-    candidate.renderOptions = source.renderOptions || candidate.renderOptions || null;
-    candidate.textComposite = source.textComposite || candidate.textComposite || null;
-    candidate.preserveSourceAlpha = Boolean(source.preserveSourceAlpha || candidate.preserveSourceAlpha);
-    candidate.transparentEdgeBackground = Boolean(source.transparentEdgeBackground || candidate.transparentEdgeBackground);
+    candidate.generationHint = Object.prototype.hasOwnProperty.call(source, 'generationHint') ? source.generationHint || null : candidate.generationHint || null;
+    candidate.renderMode = Object.prototype.hasOwnProperty.call(source, 'renderMode') ? source.renderMode || null : null;
+    candidate.renderOptions = Object.prototype.hasOwnProperty.call(source, 'renderOptions') ? source.renderOptions || null : null;
+    candidate.textComposite = Object.prototype.hasOwnProperty.call(source, 'textComposite') ? source.textComposite || null : null;
+    candidate.preserveSourceAlpha = Object.prototype.hasOwnProperty.call(source, 'preserveSourceAlpha') ? Boolean(source.preserveSourceAlpha) : false;
+    candidate.transparentEdgeBackground = Object.prototype.hasOwnProperty.call(source, 'transparentEdgeBackground') ? Boolean(source.transparentEdgeBackground) : false;
     candidate.notes = candidate.notes || [];
     if (!candidate.notes.some(note => note.type === 'config_enumerated_text_image')) {
       candidate.notes.push({ at: new Date().toISOString(), type: 'config_enumerated_text_image' });
@@ -440,6 +443,70 @@ function normalizeGeneratedPng(buffer, candidate) {
   if (!dimensions) throw new Error('Generated image is not a PNG.');
   if (dimensions.width === candidate.width && dimensions.height === candidate.height) return buffer;
   return resizePngWithUv(buffer, candidate.width, candidate.height);
+}
+
+function tempImageDir() {
+  const root = projectRoot || os.tmpdir();
+  const tempDir = path.join(root, 'tools', 'reports', '.tmp-i18n-images');
+  fs.mkdirSync(tempDir, { recursive: true });
+  return tempDir;
+}
+
+function compressPngToLimit(buffer, candidate, limit) {
+  if (buffer.length <= limit) return buffer;
+  const dimensions = pngDimensions(buffer);
+  if (!dimensions) throw new Error('Generated image is not a PNG.');
+
+  const tempDir = tempImageDir();
+  const token = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const inputPath = path.join(tempDir, `${token}-compress-input.png`);
+  const outputPath = path.join(tempDir, `${token}-compress-output.png`);
+  fs.writeFileSync(inputPath, buffer);
+
+  const script = [
+    'from PIL import Image',
+    'import os, sys',
+    'src, dst, limit = sys.argv[1], sys.argv[2], int(sys.argv[3])',
+    'img = Image.open(src).convert("RGBA")',
+    'best_path = dst + ".best.png"',
+    'best_size = os.path.getsize(src)',
+    'img.save(best_path, optimize=True, compress_level=9)',
+    'best_size = min(best_size, os.path.getsize(best_path))',
+    'for colors in [256, 192, 128, 96, 64, 48, 32, 24, 16]:',
+    '    candidate_path = dst + f".{colors}.png"',
+    '    quantized = img.quantize(colors=colors, method=Image.Quantize.FASTOCTREE)',
+    '    quantized.save(candidate_path, optimize=True, compress_level=9)',
+    '    size = os.path.getsize(candidate_path)',
+    '    if size < best_size:',
+    '        if os.path.exists(best_path): os.remove(best_path)',
+    '        os.replace(candidate_path, best_path)',
+    '        best_size = size',
+    '    else:',
+    '        os.remove(candidate_path)',
+    '    if best_size <= limit:',
+    '        break',
+    'os.replace(best_path, dst)',
+  ].join('\n');
+
+  const result = spawnSync('uv', ['run', '--with', 'pillow', 'python', '-c', script, inputPath, outputPath, String(limit)], {
+    cwd: projectRoot || process.cwd(),
+    encoding: 'utf8',
+  });
+
+  try {
+    if (result.status !== 0) {
+      throw new Error(`uv/Pillow PNG compression failed: ${(result.stderr || result.stdout || '').slice(0, 1000)}`);
+    }
+    const compressed = fs.readFileSync(outputPath);
+    const compressedDimensions = pngDimensions(compressed);
+    if (!compressedDimensions || compressedDimensions.width !== candidate.width || compressedDimensions.height !== candidate.height) {
+      throw new Error('PNG compression changed output dimensions.');
+    }
+    return compressed.length < buffer.length ? compressed : buffer;
+  } finally {
+    fs.rmSync(inputPath, { force: true });
+    fs.rmSync(outputPath, { force: true });
+  }
 }
 
 function preserveSourceAlphaWithUv(buffer, candidate) {
@@ -708,18 +775,31 @@ function renderWithWorkflowRenderer(candidate, language, text) {
     '        if box[2] - box[0] <= w and box[3] - box[1] <= h:',
     '            return f',
     '    return font(10)',
-    'def draw_centered(draw, text, rect):',
+    'def text_layer(text, rect):',
     '    stroke = int(opt.get("strokeWidth", 0))',
     '    f = fit_font(draw, text, rect, opt.get("fontSize", min(spec["height"], 40)), stroke)',
-    '    box = text_bbox(draw, (0, 0), text, f, stroke)',
+    '    layer = Image.new("RGBA", (int(rect[2]), int(rect[3])), (0,0,0,0))',
+    '    layer_draw = ImageDraw.Draw(layer)',
+    '    box = text_bbox(layer_draw, (0, 0), text, f, stroke)',
     '    tw, th = box[2] - box[0], box[3] - box[1]',
-    '    x = rect[0] + (rect[2] - tw) / 2 - box[0]',
-    '    y = rect[1] + (rect[3] - th) / 2 - box[1]',
+    '    x = (rect[2] - tw) / 2 - box[0]',
+    '    y = (rect[3] - th) / 2 - box[1]',
     '    shadow = opt.get("shadow")',
     '    if shadow:',
     '        sx, sy = opt.get("shadowOffset", [2, 3])',
-    '        draw_text(draw, (x + sx, y + sy), text, f, rgba(shadow, [0,0,0,90]), stroke, rgba(opt.get("shadowStroke"), shadow))',
-    '    draw_text(draw, (x, y), text, f, rgba(opt.get("fill"), [255,255,255,255]), stroke, rgba(opt.get("stroke"), [0,0,0,255]))',
+    '        draw_text(layer_draw, (x + sx, y + sy), text, f, rgba(shadow, [0,0,0,90]), stroke, rgba(opt.get("shadowStroke"), shadow))',
+    '    draw_text(layer_draw, (x, y), text, f, rgba(opt.get("fill"), [255,255,255,255]), stroke, rgba(opt.get("stroke"), [0,0,0,255]))',
+    '    return layer',
+    'def draw_centered(base, text, rect):',
+    '    layer = text_layer(text, rect)',
+    '    angle = float(opt.get("angle", 0) or 0)',
+    '    if angle:',
+    '        layer = layer.rotate(angle, expand=True, resample=Image.Resampling.BICUBIC)',
+    '        x = int(rect[0] + (rect[2] - layer.width) / 2)',
+    '        y = int(rect[1] + (rect[3] - layer.height) / 2)',
+    '    else:',
+    '        x, y = int(rect[0]), int(rect[1])',
+    '    base.alpha_composite(layer, (x, y))',
     'def clear_rect_from_neighbors(img, rect):',
     '    px = img.load()',
     '    x, y, w, h = [int(v) for v in rect]',
@@ -741,7 +821,7 @@ function renderWithWorkflowRenderer(candidate, language, text) {
     '    img = Image.new("RGBA", (int(spec["width"]), int(spec["height"])), (0,0,0,0))',
     'draw = ImageDraw.Draw(img)',
     'rect = opt.get("textRect") or [0, 0, img.width, img.height]',
-    'draw_centered(draw, spec["text"], rect)',
+    'draw_centered(img, spec["text"], rect)',
     'img.save(out_path, optimize=True)',
   ].join('\n');
 
@@ -768,49 +848,95 @@ function outputSizeLimit(candidate) {
 }
 
 function createCocosTextureMeta(imagePath, width, height) {
-  const parsed = path.parse(imagePath);
-  const uuid = crypto.randomUUID();
-  const spriteUuid = crypto.randomUUID();
+  const metaPath = `${imagePath}.meta`;
+  const existing = fs.existsSync(metaPath) ? readJson(metaPath) : null;
+  const uuid = existing?.uuid && !String(existing.uuid).includes('@') ? existing.uuid : crypto.randomUUID();
+  const textureUuid = `${uuid}@6c48a`;
+  const spriteUuid = existing?.subMetas?.f9941?.uuid || existing?.subMetas?.[path.parse(imagePath).name]?.uuid || `${uuid}@f9941`;
+  const halfWidth = width / 2;
+  const halfHeight = height / 2;
   const meta = {
-    ver: '2.3.7',
+    ver: '1.0.27',
+    importer: 'image',
+    imported: true,
     uuid,
-    importer: 'texture',
-    type: 'sprite',
-    wrapMode: 'clamp',
-    filterMode: 'bilinear',
-    premultiplyAlpha: false,
-    genMipmaps: false,
-    packable: true,
-    width,
-    height,
-    platformSettings: {},
+    files: ['.json', '.png'],
     subMetas: {
-      [parsed.name]: {
-        ver: '1.0.6',
-        uuid: spriteUuid,
+      '6c48a': {
+        importer: 'texture',
+        uuid: textureUuid,
+        displayName: path.parse(imagePath).name,
+        id: '6c48a',
+        name: 'texture',
+        userData: {
+          wrapModeS: 'clamp-to-edge',
+          wrapModeT: 'clamp-to-edge',
+          minfilter: 'linear',
+          magfilter: 'linear',
+          mipfilter: 'none',
+          anisotropy: 0,
+          isUuid: true,
+          imageUuidOrDatabaseUri: uuid,
+          visible: false,
+        },
+        ver: '1.0.22',
+        imported: true,
+        files: ['.json'],
+        subMetas: {},
+      },
+      f9941: {
         importer: 'sprite-frame',
-        rawTextureUuid: uuid,
-        trimType: 'auto',
-        trimThreshold: 1,
-        rotated: false,
-        offsetX: 0,
-        offsetY: 0,
-        trimX: 0,
-        trimY: 0,
-        width,
-        height,
-        rawWidth: width,
-        rawHeight: height,
-        borderTop: 0,
-        borderBottom: 0,
-        borderLeft: 0,
-        borderRight: 0,
+        uuid: spriteUuid,
+        displayName: path.parse(imagePath).name,
+        id: 'f9941',
+        name: 'spriteFrame',
+        userData: {
+          trimType: 'auto',
+          trimThreshold: 1,
+          rotated: false,
+          offsetX: 0,
+          offsetY: 0,
+          trimX: 0,
+          trimY: 0,
+          width,
+          height,
+          rawWidth: width,
+          rawHeight: height,
+          borderTop: 0,
+          borderBottom: 0,
+          borderLeft: 0,
+          borderRight: 0,
+          packable: true,
+          pixelsToUnit: 100,
+          pivotX: 0.5,
+          pivotY: 0.5,
+          meshType: 0,
+          vertices: {
+            rawPosition: [-halfWidth, -halfHeight, 0, halfWidth, -halfHeight, 0, -halfWidth, halfHeight, 0, halfWidth, halfHeight, 0],
+            indexes: [0, 1, 2, 2, 1, 3],
+            uv: [0, height, width, height, 0, 0, width, 0],
+            nuv: [0, 0, 1, 0, 0, 1, 1, 1],
+            minPos: [-halfWidth, -halfHeight, 0],
+            maxPos: [halfWidth, halfHeight, 0],
+          },
+          isUuid: true,
+          imageUuidOrDatabaseUri: textureUuid,
+          atlasUuid: '',
+        },
+        ver: '1.0.12',
+        imported: true,
+        files: ['.json'],
         subMetas: {},
       },
     },
+    userData: {
+      hasAlpha: true,
+      type: 'sprite-frame',
+      fixAlphaTransparencyArtifacts: true,
+      redirect: textureUuid,
+    },
   };
-  const metaPath = `${imagePath}.meta`;
-  if (!fs.existsSync(metaPath)) writeJson(metaPath, meta);
+  writeJson(metaPath, meta);
   return { metaPath, spriteUuid };
 }
 
@@ -1139,6 +1265,17 @@ async function runGenerate(args) {
         return;
       }
       if (buffer.length > limit) {
+        try {
+          const compressed = compressPngToLimit(buffer, candidate, limit);
+          if (compressed.length < buffer.length) {
+            candidate.notes.push({ at: new Date().toISOString(), type: 'generation_postprocess', language, action: 'compress_png', beforeBytes: buffer.length, afterBytes: compressed.length, limit });
+            buffer = compressed;
+          }
+        } catch (error) {
+          candidate.notes.push({ at: new Date().toISOString(), type: 'generation_postprocess_failed', language, action: 'compress_png', message: error.message });
+        }
+      }
+      if (buffer.length > limit) {
         target.status = 'rejected_size';
         target.outputBytes = buffer.length;
         candidate.notes.push({ at: new Date().toISOString(), type: 'generation_rejected', language, reason: 'too_large', bytes: buffer.length, limit });
@@ -1207,4 +1344,11 @@ async function runImages(nextConfig, argv) {
   return { action: 'manifest', summary: manifest.summary, outputPath: toPosix(path.relative(projectRoot, manifestPath)) };
 }
 
-module.exports = { runImages, parseArgs };
+module.exports = {
+  runImages,
+  parseArgs,
+  __test: {
+    compressPngToLimit,
+    pngDimensions,
+  },
+};

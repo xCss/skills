@@ -67,6 +67,7 @@ test('help describes imagegen workflow CLI', () => {
   const result = runCli(['--help']);
   assert.strictEqual(result.status, 0, result.stderr);
   assert.match(result.stdout, /imagegen-workflow-cli/);
+  assert.match(result.stdout, /edit/);
   assert.match(result.stdout, /generate/);
   assert.match(result.stdout, /postprocess/);
 });
@@ -170,6 +171,46 @@ test('generate dry-run returns a reusable plan and does not create output', () =
   }
 });
 
+test('edit dry-run returns Images Edit plan and does not create output', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'imagegen-workflow-edit-'));
+  try {
+    const source = path.join(tempRoot, 'source.png');
+    const mask = path.join(tempRoot, 'mask.png');
+    const out = path.join(tempRoot, 'out.png');
+    writePng(source, 1, 1);
+    writePng(mask, 1, 1);
+    const result = runCli([
+      'edit',
+      '--source', source,
+      '--mask', mask,
+      '--text', 'Start',
+      '--language', 'en',
+      '--width', '128',
+      '--height', '64',
+      '--out', out,
+      '--quality', 'medium',
+      '--output-format', 'png',
+      '--output-compression', '0',
+      '--dry-run',
+    ]);
+    assert.strictEqual(result.status, 0, result.stderr);
+    const payload = parseJson(result.stdout);
+    assert.strictEqual(payload.ok, true);
+    assert.strictEqual(payload.command, 'edit');
+    assert.strictEqual(payload.data.model, 'gpt-image-2');
+    assert.strictEqual(payload.data.plan.endpoint, '/v1/images/edits');
+    assert.strictEqual(payload.data.plan.transport, 'responses-compatible');
+    assert.strictEqual(payload.data.plan.mask, mask);
+    assert.strictEqual(payload.data.plan.editParameters.quality, 'medium');
+    assert.strictEqual(payload.data.plan.editParameters.outputCompression, 0);
+    assert.match(payload.data.prompt, /Use this exact replacement text: Start/);
+    assert.match(payload.data.prompt, /Change only/);
+    assert.strictEqual(fs.existsSync(out), false);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test('postprocess can normalize a PNG to the requested canvas', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'imagegen-workflow-test-'));
   try {
@@ -263,6 +304,50 @@ test('batch can run offline postprocess jobs and write a report', () => {
     assert.strictEqual(payload.data.items[0].id, 'button-en');
     assert.strictEqual(payload.data.items[0].ok, true);
     assert.strictEqual(fs.existsSync(out), true);
+    assert.strictEqual(fs.existsSync(report), true);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('batch can dry-run edit jobs and write a report', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'imagegen-workflow-batch-edit-'));
+  try {
+    const source = path.join(tempRoot, 'source.png');
+    const mask = path.join(tempRoot, 'mask.png');
+    const out = path.join(tempRoot, 'out.png');
+    const jobs = path.join(tempRoot, 'jobs.json');
+    const report = path.join(tempRoot, 'report.json');
+    writePng(source, 1, 1);
+    writePng(mask, 1, 1);
+    fs.writeFileSync(jobs, JSON.stringify({
+      jobs: [{
+        id: 'button-en-edit',
+        command: 'edit',
+        source,
+        mask,
+        text: 'Start',
+        language: 'en',
+        width: 128,
+        height: 64,
+        out,
+        quality: 'medium',
+        output_format: 'png',
+        dry_run: true,
+      }],
+    }, null, 2));
+    const result = runCli(['batch', '--jobs', jobs, '--out', report]);
+    assert.strictEqual(result.status, 0, result.stderr);
+    const payload = parseJson(result.stdout);
+    assert.strictEqual(payload.ok, true);
+    assert.strictEqual(payload.command, 'batch');
+    assert.strictEqual(payload.data.summary.total, 1);
+    assert.strictEqual(payload.data.summary.ok, 1);
+    assert.strictEqual(payload.data.items[0].command, 'edit');
+    assert.strictEqual(payload.data.items[0].dryRun, true);
+    assert.strictEqual(payload.data.items[0].plan.endpoint, '/v1/images/edits');
+    assert.strictEqual(payload.data.items[0].plan.transport, 'responses-compatible');
+    assert.strictEqual(fs.existsSync(out), false);
     assert.strictEqual(fs.existsSync(report), true);
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });

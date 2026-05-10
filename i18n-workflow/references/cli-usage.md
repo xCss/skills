@@ -13,6 +13,16 @@ node scripts/i18n-workflow-cli.cjs cleanup tools/reports/.tmp-i18n-images
 node scripts/i18n-workflow-cli.cjs self-test
 ```
 
+## CWD and Config Resolution
+
+`--config` is resolved relative to the current working directory, not relative to the skill directory. From a temp checkout or a shared skills repo, prefer an absolute config path:
+
+```bash
+node /tmp/skills/i18n-workflow/scripts/i18n-workflow-cli.cjs run --config /path/to/game/tools/i18n-workflow.config.cjs --steps extract,audit --dry-run
+```
+
+If the skill was installed during the current session but the runtime cannot load it yet, direct CLI invocation is still supported. Restart/open a new session before depending on the skill name trigger.
+
 ## JSON Contract
 
 Success:

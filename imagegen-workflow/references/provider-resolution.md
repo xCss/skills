@@ -1,6 +1,6 @@
 # imagegen Workflow Provider Resolution
 
-Provider credentials are required only for `generate --execute`, `batch --execute` with generate jobs, and `probe --network`. Local commands such as `doctor`, `probe`, `generate --dry-run`, `postprocess`, `batch` with offline postprocess jobs, `cleanup`, and `self-test` must not make paid or external API calls.
+Provider credentials are required only for `edit --execute`, `generate --execute`, `batch --execute` with edit/generate jobs, and `probe --network`. Local commands such as `doctor`, `probe`, `edit --dry-run`, `generate --dry-run`, `postprocess`, `batch` with dry-run/offline postprocess jobs, `cleanup`, and `self-test` must not make paid or external API calls.
 
 ## Resolution Order
 
@@ -12,7 +12,9 @@ The CLI resolves provider settings in this order:
 4. Codex provider/base_url files, which are commonly written by cc-switch: `$CODEX_HOME/config.toml` plus `$CODEX_HOME/auth.json`, or `~/.codex/config.toml` plus `~/.codex/auth.json` when `CODEX_HOME` is not set. The CLI reads the active `model_provider`, then `[model_providers.<name>].base_url`, and reads `OPENAI_API_KEY` from `auth.json`.
 5. Model fallback: `gpt-image-2`.
 
-`--base-url` may be either a root API URL or a `/responses` endpoint. The CLI appends `/responses` when needed. `probe --network` checks the sibling `/models` endpoint and reports `modelVisible` when it can parse model IDs from `data[].id`.
+`--base-url` may be either a root API URL or a `/responses` endpoint. The CLI appends `/responses` when needed for generation and resolves the sibling `/v1/images/edits` endpoint for `edit`. `probe --network` checks the sibling `/models` endpoint and reports `modelVisible` when it can parse model IDs from `data[].id`.
+
+Some codex/cc-switch backends expose text models reliably but only intermittent image support. If the same `/responses` image request flips between `200`, `502`, `503`, or empty-image-result payloads, treat the backend as image-capable-but-flaky and retry serially before changing prompts or source assets.
 
 `doctor` and `probe` include a non-secret `source` field: `args`, `environment`, `codex-config`, `mixed`, or `none`. They report only whether a base URL and API key are present; they must never print the credential value.
 
@@ -22,4 +24,4 @@ This fallback follows whatever `base_url` is configured in Codex. If cc-switch w
 
 Do not store credentials in `SKILL.md`, references, generated reports, tests, or committed config files. Do not print API keys, tokens, cookies, passwords, full Authorization headers, `.env` contents, or connection strings. If a credential must be described, write `[REDACTED]`.
 
-Before running `generate --execute` or `batch --execute` with generate jobs, tell the user it may consume provider API calls. Use `generate --dry-run` or batch dry-run jobs first when practical.
+Before running `edit --execute`, `generate --execute`, or `batch --execute` with edit/generate jobs, tell the user it may consume provider API calls. Use `edit --dry-run`, `generate --dry-run`, or batch dry-run jobs first when practical.

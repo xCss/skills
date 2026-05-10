@@ -12,6 +12,8 @@ git clone git@github.com:xCss/skills.git /tmp/_skills_repo && mkdir -p skills &&
 
 After installation, edit the project-local `tools/i18n-workflow.config.cjs` to match your project structure, then tell your agent to load the `i18n-workflow` skill. The skill uses `SKILL.md` for routing and `scripts/i18n-workflow-cli.cjs` for repeatable execution.
 
+Some agent runtimes do not hot-load newly installed skills in the current session. In that case, run the CLI directly from the copied skill folder or a temporary checkout, and restart/open a new session before relying on skill discovery.
+
 ## CLI Entry Point
 
 Primary command from `skills/i18n-workflow/`:
@@ -23,6 +25,12 @@ node scripts/i18n-workflow-cli.cjs probe --config tools/i18n-workflow.config.cjs
 node scripts/i18n-workflow-cli.cjs run --config tools/i18n-workflow.config.cjs --steps extract,audit,jobs,review --dry-run
 node scripts/i18n-workflow-cli.cjs cleanup tools/reports/.tmp-i18n-images
 node scripts/i18n-workflow-cli.cjs self-test
+```
+
+When running the CLI from outside the project root, pass an absolute config path:
+
+```bash
+node /tmp/skills/i18n-workflow/scripts/i18n-workflow-cli.cjs doctor --config /path/to/project/tools/i18n-workflow.config.cjs
 ```
 
 The CLI is the only execution surface. Implementation modules live under `scripts/i18n_workflow/`, and operational commands keep stdout JSON-parseable.
@@ -43,7 +51,11 @@ This playbook covers:
 - Quality auditing of generated images.
 - Source/target image comparison review.
 - Failed-item extraction and regeneration jobs.
+- Model-output post-processing for localized text-image assets.
+- Runtime visual-state verification for labels, toggles, popups, and sprite replacements.
 - Adding a new language end-to-end.
+
+Translation quality rule: translations should be as short and accurate as possible without losing the intended meaning, while still matching the target language's natural usage.
 
 It does **not** assume any specific engine, directory layout, or runtime configuration file. Project-specific bindings are declared in an adapter/config (see [contracts.md](contracts.md)).
 
@@ -87,13 +99,15 @@ When a text key, sprite-frame mapping, or image resource is missing for the curr
  |
 [4] Quality audit (dimensions, readability, size)
  |
-[5] Source/target comparison audit
+[5] Generated-asset post-processing (alpha/fringe/residue/canvas fit)
  |
-[6] Regeneration job extraction
+[6] Source/target comparison audit
  |
-[7] Human review (review sheets, checklists)
+[7] Regeneration job extraction and retry
  |
-[8] Regression verification in runtime
+[8] Human review (review sheets, checklists)
+ |
+[9] Regression verification in runtime
 ```
 
 ### 1. Locale Audit
@@ -109,37 +123,52 @@ Enumerate sprite frames used in scenes/prefabs. Classify which ones contain embe
 For each target language needing a localized text image:
 
 - Use the baseline language image as the visual reference.
-- Generate a target-language image at the **exact same pixel dimensions**.
+- Generate a target-language image at the **exact same pixel dimensions** whenever possible. If a user explicitly allows tolerance, keep raw generation within that tolerance and normalize the final integrated asset back to the source canvas by cropping, padding, or scaling.
 - Preserve background, transparency, button/ribbon style.
 - Replace embedded text with the translated string.
+- Use concise target text that preserves meaning and fits the source composition.
 
-Model-backed classification and generation resolve provider settings from domain-specific env, shared `BASE_URL` / `API_KEY`, or Codex provider/base_url and auth files written by tools such as cc-switch. This follows the configured URL; it does not auto-discover a local `127.0.0.1:<port>` proxy. Requests run with concurrency 10 by default and can be capped with `--concurrency=<1-10>`.
+Model-backed classification and generation resolve provider settings from domain-specific env, shared `BASE_URL` / `API_KEY`, or Codex provider/base_url and auth files written by tools such as cc-switch. This follows the configured URL; it does not auto-discover a local `127.0.0.1:<port>` proxy. Requests run with concurrency 10 by default and can be capped with `--concurrency=<1-10>`. If the user specifies a quality range such as `qlt=60~80`, keep exported/generated review assets inside that range unless the provider requires otherwise.
 
 ### 4. Quality Audit
 
 Validate generated images against the manifest:
 
-- Pixel dimensions match source.
+- Final integrated pixel dimensions match source.
 - File is a valid image.
 - File size is within the configured limit.
+- Alpha channel is preserved for transparent assets.
 
-### 5. Source/Target Comparison
+### 5. Generated-Asset Post-Processing
+
+Model output must be normalized before it is considered usable:
+
+- Crop, pad, or scale to the source canvas.
+- Remove white/gray fringe pixels, white square backgrounds, and low-saturation halo artifacts around text or signs.
+- Remove source-language ghost text/residue without damaging the translated text, stroke, shadow, or background.
+- Recenter text or artwork when model output is visibly too small or off-center.
+- Regenerate instead of patching when cleanup would destroy style, readability, or transparency.
+
+### 6. Source/Target Comparison
 
 For each generated image, compare against the baseline:
 
 - Visual scale of text vs. source.
 - Text overflow or clipping.
 - Background/style drift.
+- Edge artifacts such as white/gray borders, alpha clipping, ghost text, or unexpected filled backgrounds.
 
-### 6. Regeneration Jobs
+### 7. Regeneration Jobs
 
 Extract failed items from quality and comparison audits. Classify failure reasons using the standard enum (see [contracts.md](contracts.md)). Output a structured job list for retry.
 
-### 7. Human Review
+Retry provider/model failures, malformed images, wrong dimensions, wrong transparency, and visible artifacts before asking the user to review. Keep retry output traceable to the source asset, language, prompt, and failure reason.
+
+### 8. Human Review
 
 Use review sheets and checklists ([checklists.md](checklists.md)) for manual verification.
 
-### 8. Regression Verification
+### 9. Regression Verification
 
 Run the game in the target environment. Confirm:
 
@@ -147,6 +176,7 @@ Run the game in the target environment. Confirm:
 - Fallback chain works when resources are missing.
 - No missing sprite-frame or resource errors.
 - RTL layout is correct for applicable languages.
+- All visible UI states are localized: settings buttons, off/on toggles, popup variants, labels hidden behind sprites, and dynamic runtime text.
 
 ## Adding a New Language
 
@@ -156,5 +186,6 @@ Run the game in the target environment. Confirm:
 4. Run image generation for the new language.
 5. Run quality audit and comparison.
 6. Extract and retry any failures.
-7. Complete human review checklist.
-8. Verify in runtime.
+7. Post-process generated assets and rerun comparison/retry jobs until clean.
+8. Complete human review checklist.
+9. Verify in runtime across default and alternate UI states.

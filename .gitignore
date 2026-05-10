@@ -60,3 +60,10 @@ test-results/
 **/*_assets/
 **/bilibili-BV*.html
 **/bilibili-BV*.png
+
+# Agent/runtime local state
+.omx/
+
+# Imagegen workflow generated artifacts
+imagegen-workflow/jobs.json
+imagegen-workflow/out/

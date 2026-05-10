@@ -52,8 +52,8 @@ function isUserFacing(text) {
 }
 
 function semanticKeyForText(text) {
-  const normalized = String(text || '').trim().replace(/s+/g, ' ');
-  return SEMANTIC_TEXT_KEYS.get(normalized) || SEMANTIC_TEXT_KEYS.get(normalized.replace(/s+/g, '')) || null;
+  const normalized = String(text || '').trim().replace(/\s+/g, ' ');
+  return SEMANTIC_TEXT_KEYS.get(normalized) || SEMANTIC_TEXT_KEYS.get(normalized.replace(/\s+/g, '')) || null;
 }
 
 function keyFromText(file, text, index) {
@@ -63,6 +63,40 @@ function keyFromText(file, text, index) {
     .toLowerCase() || 'text';
   const semantic = semanticKeyForText(text);
   return `${base}.${semantic || `text_${index}`}`;
+}
+
+function runtimeTextKeyMap(config) {
+  if (typeof config.getRuntimeTextKeyMap !== 'function') return {};
+  const map = config.getRuntimeTextKeyMap();
+  return map && typeof map === 'object' ? map : {};
+}
+
+function callSourceTextToKey(config, item) {
+  if (typeof config.sourceTextToKey === 'function') {
+    const key = config.sourceTextToKey(item.text, item);
+    if (key) return key;
+  }
+  return null;
+}
+
+function canonicalKeyForItem(config, item, fallbackKey) {
+  if (typeof config.getCanonicalTextKey === 'function') {
+    const key = config.getCanonicalTextKey(item);
+    if (key) return key;
+  }
+  const sourceTextKey = callSourceTextToKey(config, item);
+  if (sourceTextKey) return sourceTextKey;
+  const map = runtimeTextKeyMap(config);
+  return map[item.text] || fallbackKey;
+}
+
+function keySourceForItem(config, item) {
+  if (typeof config.getCanonicalTextKey === 'function' && config.getCanonicalTextKey(item)) return 'config.getCanonicalTextKey';
+  if (callSourceTextToKey(config, item)) return 'config.sourceTextToKey';
+  const map = runtimeTextKeyMap(config);
+  if (map[item.text]) return 'config.getRuntimeTextKeyMap';
+  if (semanticKeyForText(item.text)) return 'semantic';
+  return 'synthetic';
 }
 
 function extractFromCocosPrefab(filePath, config) {
@@ -75,12 +109,18 @@ function extractFromCocosPrefab(filePath, config) {
     const text = item._string;
     if (!isUserFacing(text)) continue;
     const file = rel(filePath, config);
-    out.push({
+    const fallbackKey = keyFromText(file, text, i);
+    const textItem = {
       file,
       componentId: i,
       text,
-      key: keyFromText(file, text, i),
+      fallbackKey,
       type: 'cc.Label',
+    };
+    out.push({
+      ...textItem,
+      key: canonicalKeyForItem(config, textItem, fallbackKey),
+      keySource: keySourceForItem(config, textItem),
     });
   }
   return out;
@@ -103,6 +143,22 @@ function runExtract(config) {
   for (const item of items) {
     if (item.key && item.text) locale[item.key] = item.text;
   }
+  const sourceMap = runtimeTextKeyMap(config);
+  const coverage = { mapped: [], missing: [] };
+  for (const item of items) {
+    if (!item.text || item.error) continue;
+    const runtimeKey = sourceMap[item.text] || null;
+    const coverageItem = {
+      file: item.file,
+      componentId: item.componentId,
+      text: item.text,
+      key: item.key,
+      fallbackKey: item.fallbackKey || null,
+      runtimeKey,
+    };
+    if (runtimeKey || item.key !== item.fallbackKey) coverage.mapped.push(coverageItem);
+    else coverage.missing.push(coverageItem);
+  }
 
   const report = {
     generatedAt: new Date().toISOString(),
@@ -110,8 +166,11 @@ function runExtract(config) {
     summary: {
       prefabFiles: prefabFiles.length,
       extractedTexts: Object.keys(locale).length,
+      runtimeKeyMappedTexts: coverage.mapped.length,
+      runtimeKeyMissingTexts: coverage.missing.length,
     },
     items,
+    runtimeKeyCoverage: coverage,
     localeSeed: {
       [baseline]: locale,
     },

@@ -94,7 +94,17 @@ node skills/i18n-workflow/scripts/i18n-workflow-cli.cjs run --config tools/i18n-
 - `jobs`：失败重生成任务。
 - `review`：人工复核材料。
 
-模型访问按顺序使用领域专属环境变量、共享 `BASE_URL` / `API_KEY`，或 cc-switch 写入的 Codex provider/base_url 与 auth 文件；不会自动发现本地 `127.0.0.1:<port>` 代理。分类和生成请求默认并发为 10，可用 `--concurrency=<1-10>` 调整。
+模型访问按顺序使用领域专属环境变量、共享 `BASE_URL` / `API_KEY`，或 cc-switch 写入的 Codex provider/base_url 与 auth 文件；不会自动发现本地 `127.0.0.1:<port>` 代理。分类和生成请求默认并发为 10，可用 `--concurrency=<1-10>` 调整。用户指定质量范围（如 `qlt=60~80`）、尺寸容差（如 15%）、模型或并发上限时，生成、导出和后处理都必须遵守。
+
+## 文字图片生成验收门禁
+
+模型生成结果只是初稿，不能因为文件存在就验收。每个目标语言文字图片必须走完整闭环：
+
+1. **生成/重试**：provider 失败、空图、坏图、白底方块、尺寸漂移、透明通道损坏都要进入 retry/job，而不是手工忽略。
+2. **画布归一**：最终接入项目的图片必须回到源图画布尺寸；必要时本地裁切、补边、缩放，但不能破坏主体风格。
+3. **边缘清理**：清理白边、灰边、低饱和 halo、alpha 裁切、旧中文残影；若清理会伤到字面/描边/阴影，重新生成。
+4. **对照抽检**：为源图和所有目标语言做 side-by-side/contact sheet，检查文字大小、居中、背景、透明边缘和源语言残留。
+5. **运行时复核**：不只看资源文件，还要在游戏里检查默认态和变体态，例如设置按钮、开关开/关、弹窗、隐藏 label、动态提示。
 
 ## 执行原则
 
@@ -105,6 +115,8 @@ node skills/i18n-workflow/scripts/i18n-workflow-cli.cjs run --config tools/i18n-
 5. 不要硬编码语言列表，从 config 读取。
 6. 审计报告在 config 声明的 `reportDirectory` 中，每次运行自动覆盖。
 7. 新增语言时按 `checklists.md` 中的 checklist 逐项检查。
+8. 翻译要尽可能简短准确、不失本意，并贴合目标语言习惯；图片文字尤其要优先短句。
+9. 接受模型图前必须确认没有白边/灰边、源语言残影、alpha 异常、画布尺寸漂移或运行时状态漏翻。
 
 ## 自动化模式
 

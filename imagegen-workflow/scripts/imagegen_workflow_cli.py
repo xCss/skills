@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import io
 import json
 import mimetypes
 import os
@@ -128,6 +129,17 @@ def responses_endpoint(base_url: str) -> str:
     return base if base.endswith("/responses") else f"{base}/responses"
 
 
+def images_edit_endpoint(base_url: str) -> str:
+    base = base_url.rstrip("/")
+    if base.endswith("/images/edits"):
+        return base
+    if base.endswith("/responses"):
+        base = base.removesuffix("/responses")
+    if base.endswith("/v1"):
+        return f"{base}/images/edits"
+    return f"{base}/v1/images/edits"
+
+
 def command_available(command: str) -> bool:
     return shutil.which(command) is not None
 
@@ -244,6 +256,18 @@ def response_payload(text: str) -> dict[str, Any]:
     raise ValueError(f"No JSON response payload found in event stream: {text[:500]}")
 
 
+def decode_response_body(response: Any) -> str:
+    raw = response.content
+    encoding = str(response.headers.get("Content-Encoding") or "").lower()
+    if encoding == "zstd" or raw.startswith(b"\x28\xb5\x2f\xfd"):
+        try:
+            import zstandard as zstd
+        except Exception as exc:
+            raise RuntimeError("Response body is zstd-compressed but zstandard is not installed.") from exc
+        raw = zstd.ZstdDecompressor().stream_reader(io.BytesIO(raw)).read()
+    return raw.decode(response.encoding or "utf-8", errors="replace")
+
+
 def extract_image_base64(value: Any) -> str | None:
     candidates: list[str] = []
 
@@ -289,18 +313,59 @@ def build_prompt(args: argparse.Namespace) -> str:
     )
 
 
-def call_responses(provider: dict[str, str], source: Path, prompt: str) -> dict[str, Any]:
+def build_edit_prompt(args: argparse.Namespace) -> str:
+    if getattr(args, "prompt", None):
+        base_prompt = args.prompt
+    elif getattr(args, "text", None):
+        language = getattr(args, "language", None) or "target language"
+        base_prompt = "\n".join([
+            f"Edit the provided image into a {language} localized version.",
+            f"Use this exact replacement text: {args.text}",
+            "Remove the old source-language text completely.",
+        ])
+    else:
+        base_prompt = "Edit the provided image while preserving its existing composition and style."
+    extra = []
+    if getattr(args, "extra_prompt", None):
+        extra.append(args.extra_prompt)
+    if getattr(args, "guidance_file", None):
+        extra.append(Path(args.guidance_file).read_text(encoding="utf-8"))
+    exact_text = []
+    if getattr(args, "language", None):
+        exact_text.append(f"Target language: {args.language}.")
+    if getattr(args, "text", None):
+        exact_text.append(f"Use this exact replacement text: {args.text}")
+    return "\n".join(
+        part
+        for part in [
+            base_prompt,
+            "\n".join(exact_text).strip(),
+            "Change only the requested region or text. Keep everything else the same: canvas, composition, non-text artwork, colors, shadows, strokes, layout, and transparent/edge behavior unless explicitly requested otherwise.",
+            f"Return an image suitable for a final {args.width}x{args.height} canvas.",
+            "Do not add extra text, decorations, watermarks, white square backgrounds, or unintended borders/halos.",
+            "\n".join(extra).strip(),
+        ]
+        if part
+    )
+
+
+def call_responses(provider: dict[str, str], source: Path, prompt: str, mask: Path | None = None) -> dict[str, Any]:
     import requests
+
+    content: list[dict[str, str]] = [
+        {"type": "input_text", "text": prompt},
+        {"type": "input_image", "image_url": image_data_url(source)},
+    ]
+    if mask is not None:
+        content.append({"type": "input_text", "text": "The next image is an edit mask. Only the white/visible mask area may change; all unmasked regions must remain unchanged."})
+        content.append({"type": "input_image", "image_url": image_data_url(mask)})
 
     body = {
         "model": provider["model"],
         "input": [
             {
                 "role": "user",
-                "content": [
-                    {"type": "input_text", "text": prompt},
-                    {"type": "input_image", "image_url": image_data_url(source)},
-                ],
+                "content": content,
             }
         ],
     }
@@ -311,8 +376,8 @@ def call_responses(provider: dict[str, str], source: Path, prompt: str) -> dict[
         timeout=180,
     )
     if not response.ok:
-        raise RuntimeError(f"Responses API failed {response.status_code}: {redact(response.text[:1000])}")
-    return response_payload(response.text)
+        raise RuntimeError(f"Responses API failed {response.status_code}: {redact(decode_response_body(response)[:1000])}")
+    return response_payload(decode_response_body(response))
 
 
 def image_dimensions(path: Path) -> dict[str, int]:
@@ -399,11 +464,6 @@ def remove_edge_background(raw: bytes) -> bytes:
             add(x - 1, y)
             add(x, y + 1)
             add(x, y - 1)
-        for y in range(height):
-            for x in range(width):
-                r, g, b, a = px[x, y]
-                if a > 0 and min(r, g, b) >= 232 and max(r, g, b) - min(r, g, b) <= 28:
-                    px[x, y] = (r, g, b, 0)
         img.save(out_path, optimize=True)
         return out_path.read_bytes()
 
@@ -500,6 +560,37 @@ def generation_plan(args: argparse.Namespace, provider: dict[str, str], source: 
     }
 
 
+def edit_plan(args: argparse.Namespace, provider: dict[str, str], source: Path, out: Path) -> dict[str, Any]:
+    return {
+        "source": str(source),
+        "mask": str(Path(args.mask).resolve()) if getattr(args, "mask", None) else None,
+        "output": str(out),
+        "language": getattr(args, "language", None),
+        "text": getattr(args, "text", None),
+        "width": args.width,
+        "height": args.height,
+        "endpoint": "/v1/images/edits",
+        "transport": "responses-compatible",
+        "editParameters": {
+            "background": getattr(args, "background", None),
+            "quality": getattr(args, "quality", None),
+            "outputFormat": getattr(args, "output_format", None),
+            "outputCompression": getattr(args, "output_compression", None),
+            "inputFidelity": getattr(args, "input_fidelity", None),
+            "moderation": getattr(args, "moderation", None),
+            "n": getattr(args, "n", None),
+        },
+        "postprocess": {
+            "textCompositeSpec": str(Path(args.text_composite_spec).resolve()) if args.text_composite_spec else None,
+            "preserveSourceAlpha": bool(args.preserve_source_alpha),
+            "transparentEdgeBackground": bool(args.transparent_edge_background),
+            "sizeLimit": args.size_limit,
+        },
+        "provider": "responses-compatible",
+        "model": provider["model"],
+    }
+
+
 def cmd_generate(args: argparse.Namespace) -> int:
     source = Path(args.source).resolve()
     out = Path(args.out).resolve()
@@ -551,6 +642,55 @@ def cmd_generate(args: argparse.Namespace) -> int:
         return fail("generate", "GENERATION_FAILED", "Image generation failed", detail={"message": str(exc)})
 
 
+def cmd_edit(args: argparse.Namespace) -> int:
+    source = Path(args.source).resolve()
+    out = Path(args.out).resolve()
+    if not source.exists():
+        return fail("edit", "SOURCE_NOT_FOUND", "Source image does not exist", "Pass --source with a readable local image path.", {"source": str(source)}, 2)
+    if args.mask and not Path(args.mask).resolve().exists():
+        return fail("edit", "MASK_NOT_FOUND", "Mask image does not exist", "Pass --mask with a readable PNG mask path.", {"mask": str(Path(args.mask).resolve())}, 2)
+    provider = provider_config(args)
+    plan = edit_plan(args, provider, source, out)
+    warnings: list[str] = []
+    if provider["model"].startswith("gpt-image-2") and args.background == "transparent":
+        warnings.append("gpt-image-2 does not support background=transparent in the official Images API; use opaque/auto plus postprocess/background removal")
+    if args.dry_run or not args.execute:
+        if not args.execute:
+            warnings.append("dry run only; pass --execute to consume provider API calls and write output")
+        return ok("edit", {"model": provider["model"], "plan": plan, "prompt": build_edit_prompt(args)}, warnings, output=str(out), file=str(out), provider="responses-compatible", model=provider["model"], mime="image/png")
+    if not provider["base_url"] or not provider["api_key"]:
+        return fail("edit", "NO_PROVIDER_CONFIGURED", "Provider configuration is incomplete", "Set CLI args, IMAGEGEN_BASE_URL/IMAGEGEN_API_KEY, BASE_URL/API_KEY, or Codex config/auth.", status=2)
+    try:
+        mask = Path(args.mask).resolve() if args.mask else None
+        response = call_responses(provider, source, build_edit_prompt(args), mask)
+        image_b64 = extract_image_base64(response)
+        if not image_b64:
+            raise RuntimeError("No edited image base64 found in model response.")
+        output = postprocess_bytes(base64.b64decode(image_b64), args)
+        with tempfile.TemporaryDirectory(prefix="imagegen-workflow-edit-dim-") as tmp:
+            probe = Path(tmp) / "probe.png"
+            probe.write_bytes(output)
+            dimensions = image_dimensions(probe)
+        if dimensions != {"width": args.width, "height": args.height}:
+            return fail("edit", "DIMENSION_MISMATCH", "Edited image dimensions do not match the requested canvas", detail={"dimensions": dimensions, "width": args.width, "height": args.height})
+        if args.size_limit and len(output) > args.size_limit:
+            return fail("edit", "SIZE_LIMIT_EXCEEDED", "Edited image exceeds the configured size limit", detail={"bytes": len(output), "sizeLimit": args.size_limit})
+        write_output(out, output)
+        return ok(
+            "edit",
+            {"dimensions": dimensions, "bytes": len(output), "model": provider["model"], "plan": plan},
+            warnings,
+            output=str(out),
+            file=str(out),
+            media=str(out),
+            provider="responses-compatible",
+            model=provider["model"],
+            mime="image/png",
+        )
+    except Exception as exc:
+        return fail("edit", "EDIT_FAILED", "Image edit failed", detail={"message": str(exc)})
+
+
 def cmd_postprocess(args: argparse.Namespace) -> int:
     generated = Path(args.generated).resolve()
     out = Path(args.out).resolve()
@@ -574,6 +714,8 @@ def batch_job_namespace(job: dict[str, Any], defaults: argparse.Namespace) -> ar
         height=int(job["height"]) if job.get("height") is not None else None,
         out=job.get("out"),
         generated=job.get("generated"),
+        mask=job.get("mask"),
+        prompt=job.get("prompt"),
         base_url=job.get("base_url") or defaults.base_url,
         api_key=job.get("api_key") or defaults.api_key,
         model=job.get("model") or defaults.model,
@@ -585,6 +727,14 @@ def batch_job_namespace(job: dict[str, Any], defaults: argparse.Namespace) -> ar
         text_composite_spec=job.get("text_composite_spec"),
         preserve_source_alpha=bool(job.get("preserve_source_alpha")),
         transparent_edge_background=bool(job.get("transparent_edge_background")),
+        background=job.get("background"),
+        quality=job.get("quality"),
+        output_format=job.get("output_format"),
+        output_compression=int(job["output_compression"]) if job.get("output_compression") is not None else None,
+        input_fidelity=job.get("input_fidelity"),
+        moderation=job.get("moderation"),
+        n=int(job["n"]) if job.get("n") is not None else None,
+        user=job.get("user"),
     )
 
 
@@ -626,6 +776,37 @@ def run_batch_item(job: dict[str, Any], defaults: argparse.Namespace) -> dict[st
             image_b64 = extract_image_base64(response)
             if not image_b64:
                 raise RuntimeError("No generated image base64 found in model response.")
+            output = postprocess_bytes(base64.b64decode(image_b64), args)
+            write_output(out, output)
+            return {
+                "id": item_id,
+                "command": command,
+                "ok": True,
+                "file": str(out),
+                "mime": "image/png",
+                "dimensions": image_dimensions(out),
+                "bytes": len(output),
+            }
+        if command == "edit":
+            source = Path(args.source).resolve()
+            out = Path(args.out).resolve()
+            provider = provider_config(args)
+            if args.dry_run or not args.execute:
+                return {
+                    "id": item_id,
+                    "command": command,
+                    "ok": True,
+                    "dryRun": True,
+                    "file": str(out),
+                    "plan": edit_plan(args, provider, source, out),
+                }
+            if not provider["base_url"] or not provider["api_key"]:
+                raise RuntimeError("Provider environment is incomplete")
+            mask = Path(args.mask).resolve() if args.mask else None
+            response = call_responses(provider, source, build_edit_prompt(args), mask)
+            image_b64 = extract_image_base64(response)
+            if not image_b64:
+                raise RuntimeError("No edited image base64 found in model response.")
             output = postprocess_bytes(base64.b64decode(image_b64), args)
             write_output(out, output)
             return {
@@ -710,6 +891,13 @@ def positive_int(value: str) -> int:
     return parsed
 
 
+def compression_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 0 or parsed > 100:
+        raise argparse.ArgumentTypeError("must be between 0 and 100")
+    return parsed
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="imagegen-workflow-cli", description="Reference-image generation and postprocessing workflow CLI.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -746,6 +934,36 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--preserve-source-alpha", dest="preserve_source_alpha", action="store_true")
     generate.add_argument("--transparent-edge-background", dest="transparent_edge_background", action="store_true")
     generate.set_defaults(func=cmd_generate)
+
+    edit = subparsers.add_parser("edit")
+    edit.add_argument("--source", required=True)
+    edit.add_argument("--mask")
+    edit.add_argument("--prompt")
+    edit.add_argument("--text")
+    edit.add_argument("--language")
+    edit.add_argument("--width", required=True, type=positive_int)
+    edit.add_argument("--height", required=True, type=positive_int)
+    edit.add_argument("--out", required=True)
+    edit.add_argument("--base-url", dest="base_url")
+    edit.add_argument("--api-key", dest="api_key")
+    edit.add_argument("--model")
+    edit.add_argument("--dry-run", action="store_true")
+    edit.add_argument("--execute", action="store_true")
+    edit.add_argument("--extra-prompt", dest="extra_prompt")
+    edit.add_argument("--guidance-file", dest="guidance_file")
+    edit.add_argument("--size-limit", dest="size_limit", type=positive_int)
+    edit.add_argument("--text-composite-spec", dest="text_composite_spec")
+    edit.add_argument("--preserve-source-alpha", dest="preserve_source_alpha", action="store_true")
+    edit.add_argument("--transparent-edge-background", dest="transparent_edge_background", action="store_true")
+    edit.add_argument("--background", choices=["transparent", "opaque", "auto"])
+    edit.add_argument("--quality", choices=["low", "medium", "high", "auto", "standard"])
+    edit.add_argument("--output-format", dest="output_format", choices=["png", "webp", "jpeg"])
+    edit.add_argument("--output-compression", dest="output_compression", type=compression_int)
+    edit.add_argument("--input-fidelity", dest="input_fidelity", choices=["low", "high"])
+    edit.add_argument("--moderation")
+    edit.add_argument("--n", type=positive_int)
+    edit.add_argument("--user")
+    edit.set_defaults(func=cmd_edit)
 
     postprocess = subparsers.add_parser("postprocess")
     postprocess.add_argument("--generated", required=True)

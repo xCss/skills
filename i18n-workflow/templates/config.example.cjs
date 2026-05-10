@@ -40,6 +40,19 @@ module.exports = {
     return {};
   },
 
+  // Optional: map extracted Cocos Label source text to the runtime canonical key.
+  // Use this when prefabs keep source-language text and runtime code translates via keys.
+  sourceTextToKey(text, context) {
+    // Example: return { '开始游戏': 'ui.start_game' }[text] || null;
+    // context: { file, componentId, text, fallbackKey, type }
+    return null;
+  },
+
+  // Optional: return the same map as an object so extract can report coverage.
+  getRuntimeTextKeyMap() {
+    return {};
+  },
+
   // --- Text-Image Source ---
   // Return an array of { imagePath, width, height, spriteFrameUuid, resourcesPath }.
   // 如何枚举取决于项目的资源管理方式。
