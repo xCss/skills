@@ -38,6 +38,7 @@ node skills/i18n-workflow/scripts/i18n-workflow-cli.cjs run --config tools/i18n-
 - `supportedLanguages` 只能包含当前工作区实际有 runtime/locale/资源支持、并准备随包发布的语言。
 - 不要因为 `git ls-files`、`git status` 中的删除项、`git show HEAD:<path>`、旧分支、旧提交或历史 i18n 实验而把语言加入当前审计。
 - 如果当前工作区没有 `en/ar/vi` runtime、locale 或资源，配置应保持 `supportedLanguages: ['zh']` 和 `fallbackChain: ['zh']`。
+- 如果浏览器语言自动检测没有命中已发布语言，并且当前工作区已发布 `en`，运行时应先回退到 `en`，再考虑基准/源语言。
 - 只有用户明确要求“对比历史 i18n”“检查被删除的多语言资源”“恢复旧 i18n”时，才可以读取 Git 历史；这种结果必须标注为历史/回归审计，不得混入当前工作区审计结论。
 
 ### 首次绑定流程
@@ -111,7 +112,7 @@ node skills/i18n-workflow/scripts/i18n-workflow-cli.cjs run --config tools/i18n-
 1. 先读本目录下 `README.md` 确认流程，再动手。
 2. 先读项目 config 确认当前语言配置。
 3. 当前工作区没有多语言基础设施时，保持 zh-only 审计；不要从历史文件推断 en/ar/vi。
-4. 运行时语言由项目当前 runtime 决定；缺失时按当前 config 的 fallback chain 回退。
+4. 运行时语言由项目当前 runtime 决定；浏览器检测失败时优先回退到 `en`（若已发布），否则按当前 config 的 fallback chain/baseline 回退。
 5. 不要硬编码语言列表，从 config 读取。
 6. 审计报告在 config 声明的 `reportDirectory` 中，每次运行自动覆盖。
 7. 新增语言时按 `checklists.md` 中的 checklist 逐项检查。

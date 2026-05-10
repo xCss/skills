@@ -18,6 +18,8 @@ Translation quality rule: keep translations as short and accurate as possible wi
 
 Localized text-image rule: model output is only the first draft. Before accepting it, post-process and visually verify alpha edges, white/gray fringes, source-language residue, canvas fit, and UI-state coverage.
 
+Runtime language rule: when browser auto-detection (`navigator.languages` / `navigator.language`) fails to match a shipped language, fall back to English (`en`) before the baseline/source language. If `en` is not shipped in the current worktree, keep the configured fallback chain/baseline.
+
 The current-worktree boundary is strict: audits describe files that exist now. Do not infer supported languages or localized assets from Git history, deleted files, old branches, or planned work unless the user explicitly asks for a history/regression audit.
 
 ## When to Use

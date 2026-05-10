@@ -10,6 +10,7 @@ module.exports = {
   supportedLanguages: [],       // e.g. ["zh", "en", "ar", "vi"]
   baselineLanguage: '',         // e.g. "zh"
   fallbackChain: [],            // e.g. ["zh", "en"]
+  browserLanguageFallback: 'en', // when browser detection misses supported languages, prefer en if shipped
 
   // --- Runtime ---
   // Description of how runtime language is detected.

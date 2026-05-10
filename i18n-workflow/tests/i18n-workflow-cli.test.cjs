@@ -9,6 +9,7 @@ const zlib = require('zlib');
 
 const root = path.resolve(__dirname, '..');
 const cli = path.join(root, 'scripts', 'i18n-workflow-cli.cjs');
+const { resolveRuntimeLanguage } = require(path.join(root, 'scripts', 'i18n_workflow', 'common.cjs'));
 
 function runCli(args, options = {}) {
   return spawnSync(process.execPath, [cli, ...args], {
@@ -177,6 +178,27 @@ function createTransparentPng(width, height) {
     pngChunk('IEND', Buffer.alloc(0)),
   ]);
 }
+
+test('runtime language falls back to English when browser detection has no supported match', () => {
+  const config = {
+    supportedLanguages: ['zh', 'en'],
+    baselineLanguage: 'zh',
+    fallbackChain: ['zh', 'en'],
+  };
+
+  assert.strictEqual(resolveRuntimeLanguage(['fr-FR'], config), 'en');
+  assert.strictEqual(resolveRuntimeLanguage([], config), 'en');
+});
+
+test('runtime language uses configured fallback when English is not shipped', () => {
+  const config = {
+    supportedLanguages: ['zh'],
+    baselineLanguage: 'zh',
+    fallbackChain: ['zh'],
+  };
+
+  assert.strictEqual(resolveRuntimeLanguage(['fr-FR'], config), 'zh');
+});
 
 test('help describes canonical CLI without legacy tool routing', () => {
   const result = runCli(['--help']);

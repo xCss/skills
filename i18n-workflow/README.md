@@ -68,7 +68,8 @@ Every project must declare these via its adapter/config:
 | `supportedLanguages` | All languages the project ships (e.g. `["zh","en","ar","vi"]`). |
 | `runtimeLanguage` | Resolved at runtime from the user environment (e.g. browser `navigator.languages`). |
 | `baselineLanguage` | The language whose assets serve as the visual baseline for image generation and comparison. Configurable; commonly `zh`. |
-| `fallbackChain` | Ordered list used when a resource is missing for the current language. Example: `[runtimeLanguage, "zh", "en"]`. |
+| `fallbackChain` | Ordered list used when a resource is missing for the current language. Prefer English before the baseline when both are shipped. Example: `[runtimeLanguage, "en", "zh"]`. |
+| `browserLanguageFallback` | Language used when browser auto-detection has no supported match. Default/recommended value: `"en"`; ignored until `en` is in `supportedLanguages`. |
 
 ### Runtime Language Detection
 
@@ -76,7 +77,8 @@ Recommended detection order:
 
 1. User-persisted preference (e.g. localStorage).
 2. Environment language (browser: `navigator.languages` / `navigator.language`; native: OS locale).
-3. First entry in `fallbackChain` that has full locale coverage.
+3. English (`browserLanguageFallback`, default `"en"`) when detection fails or returns an unsupported language and English is shipped.
+4. First entry in `fallbackChain` that has full locale coverage.
 
 Language codes from the environment must be normalized to the project's canonical codes before lookup (e.g. `zh-CN` / `zh-Hans-CN` -> `zh`, `en-US` -> `en`, `vi-VN` -> `vi`).
 

@@ -24,6 +24,9 @@ module.exports = {
   // --- Runtime ---
   // 描述运行时如何检测用户语言。仅用于文档/审计参考，不影响工具执行。
   runtimeLanguageDetector: 'browser-navigator',
+  // 浏览器语言自动检测没有命中 supportedLanguages 时，默认回退到英文。
+  // 如果当前工作区尚未发布 en，本值会被工具忽略并继续使用 fallbackChain/baseline。
+  browserLanguageFallback: 'en',
 
   // --- Paths (project-relative, POSIX separators) ---
   projectRoot,

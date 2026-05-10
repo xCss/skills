@@ -71,13 +71,16 @@ function normalizeLanguageCode(code) {
 }
 
 function resolveRuntimeLanguage(browserLanguages, config) {
-  const supported = new Set(config.supportedLanguages);
+  const supported = new Set(Array.isArray(config.supportedLanguages) ? config.supportedLanguages : []);
   for (const raw of (browserLanguages || [])) {
     const normalized = normalizeLanguageCode(raw);
     if (normalized && supported.has(normalized)) return normalized;
   }
-  for (const fallback of config.fallbackChain) {
-    if (supported.has(fallback)) return fallback;
+  const browserFallback = normalizeLanguageCode(config.browserLanguageFallback || 'en');
+  if (browserFallback && supported.has(browserFallback)) return browserFallback;
+  for (const fallback of (config.fallbackChain || [])) {
+    const normalized = normalizeLanguageCode(fallback);
+    if (normalized && supported.has(normalized)) return normalized;
   }
   return config.baselineLanguage;
 }
