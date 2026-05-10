@@ -171,6 +171,108 @@ test('generate dry-run returns a reusable plan and does not create output', () =
   }
 });
 
+test('generate dry-run supports text-only generation without source image', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'imagegen-workflow-generate-text-'));
+  try {
+    const out = path.join(tempRoot, 'out.png');
+    const result = runCli([
+      'generate',
+      '--text', 'fresh-blue-icon',
+      '--language', 'en',
+      '--width', '128',
+      '--height', '64',
+      '--out', out,
+      '--dry-run',
+    ]);
+    assert.strictEqual(result.status, 0, result.stderr);
+    const payload = parseJson(result.stdout);
+    assert.strictEqual(payload.ok, true);
+    assert.strictEqual(payload.command, 'generate');
+    assert.strictEqual(payload.data.plan.source, null);
+    assert.match(payload.data.plan.prompt, /fresh-blue-icon/);
+    assert.strictEqual(fs.existsSync(out), false);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('generate execute without source sends text-only Responses request', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'imagegen-workflow-generate-execute-text-'));
+  const out = path.join(tempRoot, 'out.png');
+  let requestBody = null;
+  const server = http.createServer((req, res) => {
+    if (req.url === '/v1/responses') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        requestBody = JSON.parse(body);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          output: [{
+            content: [{
+              type: 'output_image',
+              image_base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',
+            }],
+          }],
+        }));
+      });
+      return;
+    }
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end('{}');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const result = await runCliAsync([
+      'generate',
+      '--text', 'fresh-blue-icon',
+      '--language', 'en',
+      '--width', '1',
+      '--height', '1',
+      '--out', out,
+      '--base-url', `http://127.0.0.1:${server.address().port}/v1`,
+      '--api-key', 'TEST_ONLY_IMAGEGEN_GENERATE_KEY',
+      '--execute',
+    ]);
+    assert.strictEqual(result.status, 0, result.stderr);
+    const payload = parseJson(result.stdout);
+    assert.strictEqual(payload.ok, true);
+    assert.strictEqual(payload.command, 'generate');
+    assert.strictEqual(fs.existsSync(out), true);
+    const content = requestBody.input[0].content;
+    assert.strictEqual(content.some(item => item.type === 'input_text'), true);
+    assert.strictEqual(content.some(item => item.type === 'input_image'), false);
+    assert.doesNotMatch(result.stdout, /TEST_ONLY_IMAGEGEN_GENERATE_KEY/);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('generate still requires source when preserving source alpha', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'imagegen-workflow-alpha-source-'));
+  try {
+    const out = path.join(tempRoot, 'out.png');
+    const result = runCli([
+      'generate',
+      '--text', 'Start',
+      '--language', 'en',
+      '--width', '128',
+      '--height', '64',
+      '--out', out,
+      '--preserve-source-alpha',
+      '--dry-run',
+    ]);
+    assert.strictEqual(result.status, 2, result.stderr);
+    const payload = parseJson(result.stdout);
+    assert.strictEqual(payload.ok, false);
+    assert.strictEqual(payload.command, 'generate');
+    assert.strictEqual(payload.error.code, 'SOURCE_REQUIRED');
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test('edit dry-run returns Images Edit plan and does not create output', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'imagegen-workflow-edit-'));
   try {
@@ -304,6 +406,41 @@ test('batch can run offline postprocess jobs and write a report', () => {
     assert.strictEqual(payload.data.items[0].id, 'button-en');
     assert.strictEqual(payload.data.items[0].ok, true);
     assert.strictEqual(fs.existsSync(out), true);
+    assert.strictEqual(fs.existsSync(report), true);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('batch can dry-run text-only generate jobs without source', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'imagegen-workflow-batch-generate-text-'));
+  try {
+    const out = path.join(tempRoot, 'out.png');
+    const jobs = path.join(tempRoot, 'jobs.json');
+    const report = path.join(tempRoot, 'report.json');
+    fs.writeFileSync(jobs, JSON.stringify({
+      jobs: [{
+        id: 'fresh-icon',
+        command: 'generate',
+        text: 'fresh-blue-icon',
+        language: 'en',
+        width: 128,
+        height: 64,
+        out,
+        dry_run: true,
+      }],
+    }, null, 2));
+    const result = runCli(['batch', '--jobs', jobs, '--out', report]);
+    assert.strictEqual(result.status, 0, result.stderr);
+    const payload = parseJson(result.stdout);
+    assert.strictEqual(payload.ok, true);
+    assert.strictEqual(payload.command, 'batch');
+    assert.strictEqual(payload.data.summary.total, 1);
+    assert.strictEqual(payload.data.summary.ok, 1);
+    assert.strictEqual(payload.data.items[0].command, 'generate');
+    assert.strictEqual(payload.data.items[0].dryRun, true);
+    assert.strictEqual(payload.data.items[0].plan.source, null);
+    assert.strictEqual(fs.existsSync(out), false);
     assert.strictEqual(fs.existsSync(report), true);
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });

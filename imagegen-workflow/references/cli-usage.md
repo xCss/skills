@@ -11,8 +11,8 @@ uv run python scripts/imagegen_workflow_cli.py probe
 uv run python scripts/imagegen_workflow_cli.py probe --network --model gpt-image-2
 uv run python scripts/imagegen_workflow_cli.py edit --source source.png --mask mask.png --prompt "Erase the old text and render Start in the same style; keep everything else unchanged" --width 240 --height 80 --out out.png --quality medium --output-format png --dry-run
 uv run python scripts/imagegen_workflow_cli.py edit --source source.png --text "Start" --language en --width 240 --height 80 --out out.png --execute
-uv run python scripts/imagegen_workflow_cli.py generate --source source.png --text "Start" --language en --width 240 --height 80 --out out.png --dry-run
-uv run python scripts/imagegen_workflow_cli.py generate --source source.png --text "Start" --language en --width 240 --height 80 --out out.png --execute
+uv run python scripts/imagegen_workflow_cli.py generate --text "fresh-blue-icon" --language en --width 240 --height 80 --out out.png --dry-run
+uv run python scripts/imagegen_workflow_cli.py generate --source reference.png --text "Start" --language en --width 240 --height 80 --out out.png --execute
 uv run python scripts/imagegen_workflow_cli.py postprocess --generated raw.png --source source.png --width 240 --height 80 --out out.png --preserve-source-alpha
 uv run python scripts/imagegen_workflow_cli.py batch --jobs jobs.json --out report.json
 uv run python scripts/imagegen_workflow_cli.py cleanup /tmp/imagegen-workflow-artifact.png
@@ -55,7 +55,7 @@ Failure:
 
 ## Cross-Skill Use
 
-Other skills should call this CLI for source-image edits, generation, and postprocessing instead of reimplementing provider calls or Pillow transforms. Prefer `edit` over `generate` when a current image should be modified. Pass project-specific visual requirements through `--prompt`, `--extra-prompt`, `--guidance-file`, `--mask`, `--background`, `--quality`, `--output-format`, `--output-compression`, `--input-fidelity`, `--text-composite-spec`, `--preserve-source-alpha`, and `--transparent-edge-background`.
+Other skills should call this CLI for source-image edits, generation, and postprocessing instead of reimplementing provider calls or Pillow transforms. Prefer `edit` over `generate` when a current image should be modified. For `generate`, omit `--source` for text-only/fresh image generation and pass `--source` only when the model should use a reference image. Pass project-specific visual requirements through `--prompt`, `--extra-prompt`, `--guidance-file`, `--mask`, `--background`, `--quality`, `--output-format`, `--output-compression`, `--input-fidelity`, `--text-composite-spec`, `--preserve-source-alpha`, and `--transparent-edge-background`.
 
 `edit` maps to the official Images Edit style of request. Use `--mask` for regional changes; mask files must be compatible PNGs with an alpha channel and the same dimensions as the edited image. If the provider lacks `/v1/images/edits`, the CLI keeps edit semantics by sending the source image and mask through the Responses-compatible path. Do not promise pixel-perfect mask adherence: model masks are guidance and still need visual review. For `gpt-image-2`, avoid `--background transparent`; use `opaque` or `auto`, then postprocess if the final asset needs transparency.
 
@@ -64,6 +64,8 @@ The Responses image path may be intermittent on some providers: a successful run
 For localized text-image edits, always pass `--text` with the exact target string even when `--prompt` is present. The prompt should say: change only the masked/title area, keep everything else unchanged, and do not add rectangular patches, debris, extra punctuation, or new outlines.
 
 Avoid local text drawing as a substitute for model edit. Local operations are acceptable for postprocessing (canvas normalization, alpha restoration, edge-connected black matte cleanup, compression), but typography changes should stay in the model edit path unless the user explicitly requests a local fallback.
+
+Text-only `generate` jobs send only text content to the Responses-compatible provider. Reference-backed `generate --source reference.png` jobs add one input image. `--source` remains required when using `--preserve-source-alpha` or `--text-composite-spec`, because those postprocessing modes need a source canvas/alpha channel.
 
 When a Responses image call succeeds, inspect the returned `image_generation_call.result` (or equivalent edited image payload). A plain `200` is not enough if the response contains no image base64.
 
@@ -83,6 +85,25 @@ Batch input may be either a list or an object with `jobs`. Each job should inclu
       "height": 80,
       "out": "/tmp/out.png",
       "preserve_source_alpha": true
+    }
+  ]
+}
+```
+
+Fresh-image batch jobs can omit `source`:
+
+```json
+{
+  "jobs": [
+    {
+      "id": "fresh-icon",
+      "command": "generate",
+      "text": "fresh-blue-icon",
+      "language": "en",
+      "width": 240,
+      "height": 80,
+      "out": "/tmp/out.png",
+      "dry_run": true
     }
   ]
 }

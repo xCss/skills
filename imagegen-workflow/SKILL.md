@@ -1,6 +1,6 @@
 ---
 name: imagegen-workflow
-description: Use when Codex needs repeatable reference-image generation, localized text-image replacement, PNG postprocessing, model/provider readiness checks, or cleanup through a stable JSON CLI instead of ad-hoc image generation scripts.
+description: Use when Codex needs repeatable image generation with optional references, localized text-image replacement, PNG postprocessing, model/provider readiness checks, or cleanup through a stable JSON CLI instead of ad-hoc image generation scripts.
 ---
 
 # imagegen Workflow
@@ -9,7 +9,7 @@ description: Use when Codex needs repeatable reference-image generation, localiz
 
 Use this skill to route reusable image-generation and image-edit execution through `scripts/imagegen_workflow_cli.py`. The skill layer decides whether model-backed editing, generation, or offline postprocessing is appropriate; the CLI handles provider resolution, Images/Responses-compatible API calls, image extraction, PNG normalization, postprocessing, JSON output, and cleanup.
 
-Prefer this skill when a workflow needs a source/reference image, target text, exact output dimensions, provider credentials, image edit/mask behavior, or repeatable postprocessing. Do not use it for one-off visual brainstorming that is better handled by the native image tool, or for pure SVG/code-native assets.
+Prefer this skill when a workflow needs a new generated image, optional source/reference image, target text or prompt, exact output dimensions, provider credentials, image edit/mask behavior, or repeatable postprocessing. Do not use it for one-off visual brainstorming that is better handled by the native image tool, or for pure SVG/code-native assets.
 
 Core rule: when modifying an existing image, prefer `edit` over full `generate`. Use full generation only when there is no usable source image, the user explicitly wants a fresh image, or the requested change is effectively a full replacement.
 
@@ -23,7 +23,8 @@ uv run python scripts/imagegen_workflow_cli.py doctor
 uv run python scripts/imagegen_workflow_cli.py probe
 uv run python scripts/imagegen_workflow_cli.py probe --network
 uv run python scripts/imagegen_workflow_cli.py edit --source source.png --mask mask.png --prompt "Erase the old text and render Start in the same style; keep everything else unchanged" --width 240 --height 80 --out out.png --dry-run
-uv run python scripts/imagegen_workflow_cli.py generate --source source.png --text "Start" --language en --width 240 --height 80 --out out.png --dry-run
+uv run python scripts/imagegen_workflow_cli.py generate --text "fresh-blue-icon" --language en --width 240 --height 80 --out out.png --dry-run
+uv run python scripts/imagegen_workflow_cli.py generate --source reference.png --text "Start" --language en --width 240 --height 80 --out out.png --dry-run
 uv run python scripts/imagegen_workflow_cli.py postprocess --generated raw.png --width 240 --height 80 --out out.png
 uv run python scripts/imagegen_workflow_cli.py batch --jobs jobs.json --out report.json
 uv run python scripts/imagegen_workflow_cli.py cleanup /tmp/imagegen-workflow-artifact.png
@@ -41,7 +42,7 @@ When the configured provider does not expose `/v1/images/edits`, keep the `edit`
 
 If the Responses image path is flaky, retry the same edit/generate job serially before changing the prompt or mask. Treat repeated `502`, `503`, or empty-image-result responses as transport instability, not as proof that the prompt is wrong.
 
-Use `generate --dry-run` to inspect the prompt plan without spending API calls. Use `generate --execute` only when the task requires a fresh model image rather than editing a source. Default provider resolution is `--base-url` / `--api-key`, then `IMAGEGEN_BASE_URL` / `IMAGEGEN_API_KEY`, then `BASE_URL` / `API_KEY`, then Codex provider/base_url files written by tools such as cc-switch: `$CODEX_HOME/config.toml` plus `$CODEX_HOME/auth.json`, or `~/.codex/config.toml` plus `~/.codex/auth.json`. This follows the configured URL; it does not auto-discover a local `127.0.0.1:<port>` proxy. Default model is `IMAGEGEN_MODEL`, then `I18N_IMAGE_MODEL`, then `gpt-image-2`.
+Use `generate --dry-run` to inspect the prompt plan without spending API calls. `generate --source` is optional: omit it for text-only/fresh image generation, and pass it only when the model should use a reference image. Use `generate --execute` only when the task requires a fresh model image rather than editing a source. `--source` is still required with source-dependent postprocessing such as `--preserve-source-alpha` or `--text-composite-spec`. Default provider resolution is `--base-url` / `--api-key`, then `IMAGEGEN_BASE_URL` / `IMAGEGEN_API_KEY`, then `BASE_URL` / `API_KEY`, then Codex provider/base_url files written by tools such as cc-switch: `$CODEX_HOME/config.toml` plus `$CODEX_HOME/auth.json`, or `~/.codex/config.toml` plus `~/.codex/auth.json`. This follows the configured URL; it does not auto-discover a local `127.0.0.1:<port>` proxy. Default model is `IMAGEGEN_MODEL`, then `I18N_IMAGE_MODEL`, then `gpt-image-2`.
 
 Use `postprocess` when a generated PNG already exists and needs exact canvas normalization, source-alpha preservation, edge-background transparency cleanup, or text compositing from a JSON spec.
 
@@ -54,7 +55,8 @@ Use `batch` when another skill has multiple JSON-described jobs. Batch supports 
 | Existing image needs text replacement, artifact cleanup, small style fix, extension, or localized region change | `edit` |
 | Existing image has a known change area | `edit --mask mask.png` |
 | Existing image only needs canvas/alpha/fringe cleanup after model output | `postprocess` |
-| No useful source image exists, or the user asks for a brand-new concept | `generate` |
+| No useful source image exists, or the user asks for a brand-new concept | `generate` without `--source` |
+| A fresh image should loosely follow a reference without editing it in-place | `generate --source reference.png` |
 
 Prompt edits with explicit invariants: “change only X; keep canvas, composition, non-text art, colors, stroke, shadow, transparency, and layout unchanged.” Avoid vague “replace text” prompts; require “erase the original text completely, reconstruct the underlying surface/background in the same style, then render the new text as native artwork.”
 

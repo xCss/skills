@@ -290,12 +290,24 @@ def extract_image_base64(value: Any) -> str | None:
     return candidates[0] if candidates else None
 
 
-def build_prompt(args: argparse.Namespace) -> str:
+def build_prompt(args: argparse.Namespace, source: Path | None = None) -> str:
     extra = []
     if args.extra_prompt:
         extra.append(args.extra_prompt)
     if args.guidance_file:
         extra.append(Path(args.guidance_file).read_text(encoding="utf-8"))
+    if source is None:
+        return "\n".join(
+            part
+            for part in [
+                f"Create a new {args.language} image from this prompt/content request:",
+                args.text,
+                f"Output a PNG with exactly {args.width}x{args.height} pixels.",
+                "Do not add extra text, decorations, borders, watermarks, or unintended UI chrome unless explicitly requested.",
+                "\n".join(extra).strip(),
+            ]
+            if part
+        )
     return "\n".join(
         part
         for part in [
@@ -349,13 +361,14 @@ def build_edit_prompt(args: argparse.Namespace) -> str:
     )
 
 
-def call_responses(provider: dict[str, str], source: Path, prompt: str, mask: Path | None = None) -> dict[str, Any]:
+def call_responses(provider: dict[str, str], source: Path | None, prompt: str, mask: Path | None = None) -> dict[str, Any]:
     import requests
 
     content: list[dict[str, str]] = [
         {"type": "input_text", "text": prompt},
-        {"type": "input_image", "image_url": image_data_url(source)},
     ]
+    if source is not None:
+        content.append({"type": "input_image", "image_url": image_data_url(source)})
     if mask is not None:
         content.append({"type": "input_text", "text": "The next image is an edit mask. Only the white/visible mask area may change; all unmasked regions must remain unchanged."})
         content.append({"type": "input_image", "image_url": image_data_url(mask)})
@@ -537,18 +550,31 @@ def postprocess_bytes(raw: bytes, args: argparse.Namespace) -> bytes:
     return output
 
 
+def optional_source_error(args: argparse.Namespace, source: Path | None) -> tuple[str, str | None, dict[str, Any] | None]:
+    if getattr(args, "text_composite_spec", None) and source is None:
+        return "SOURCE_REQUIRED", "--source is required with --text-composite-spec", None
+    if getattr(args, "preserve_source_alpha", False) and source is None:
+        return "SOURCE_REQUIRED", "--source is required with --preserve-source-alpha", None
+    if source is not None and not source.exists():
+        return "SOURCE_NOT_FOUND", "Source image does not exist", {"source": str(source)}
+    return "", None, None
+
+
 def write_output(path: Path, raw: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(raw)
 
 
-def generation_plan(args: argparse.Namespace, provider: dict[str, str], source: Path, out: Path) -> dict[str, Any]:
+def generation_plan(args: argparse.Namespace, provider: dict[str, str], source: Path | None, out: Path) -> dict[str, Any]:
     return {
-        "source": str(source),
+        "source": str(source) if source is not None else None,
         "output": str(out),
         "language": args.language,
+        "text": args.text,
         "width": args.width,
         "height": args.height,
+        "mode": "reference" if source is not None else "text-only",
+        "prompt": build_prompt(args, source),
         "postprocess": {
             "textCompositeSpec": str(Path(args.text_composite_spec).resolve()) if args.text_composite_spec else None,
             "preserveSourceAlpha": bool(args.preserve_source_alpha),
@@ -592,10 +618,11 @@ def edit_plan(args: argparse.Namespace, provider: dict[str, str], source: Path, 
 
 
 def cmd_generate(args: argparse.Namespace) -> int:
-    source = Path(args.source).resolve()
+    source = Path(args.source).resolve() if args.source else None
     out = Path(args.out).resolve()
-    if not source.exists():
-        return fail("generate", "SOURCE_NOT_FOUND", "Source image does not exist", "Pass --source with a readable local image path.", {"source": str(source)}, 2)
+    error_code, error_message, error_detail = optional_source_error(args, source)
+    if error_code:
+        return fail("generate", error_code, error_message or "Invalid source configuration", "Pass --source with a readable local image path.", error_detail, 2)
     provider = provider_config(args)
     plan = generation_plan(args, provider, source, out)
     if args.dry_run or not args.execute:
@@ -613,7 +640,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
     if not provider["base_url"] or not provider["api_key"]:
         return fail("generate", "NO_PROVIDER_CONFIGURED", "Provider configuration is incomplete", "Set CLI args, IMAGEGEN_BASE_URL/IMAGEGEN_API_KEY, BASE_URL/API_KEY, or Codex config/auth.", status=2)
     try:
-        response = call_responses(provider, source, build_prompt(args))
+        response = call_responses(provider, source, build_prompt(args, source))
         image_b64 = extract_image_base64(response)
         if not image_b64:
             raise RuntimeError("No generated image base64 found in model response.")
@@ -758,8 +785,11 @@ def run_batch_item(job: dict[str, Any], defaults: argparse.Namespace) -> dict[st
                 "bytes": len(output),
             }
         if command == "generate":
-            source = Path(args.source).resolve()
+            source = Path(args.source).resolve() if args.source else None
             out = Path(args.out).resolve()
+            error_code, error_message, _error_detail = optional_source_error(args, source)
+            if error_code:
+                raise ValueError(error_message)
             provider = provider_config(args)
             if args.dry_run or not args.execute:
                 return {
@@ -772,7 +802,7 @@ def run_batch_item(job: dict[str, Any], defaults: argparse.Namespace) -> dict[st
                 }
             if not provider["base_url"] or not provider["api_key"]:
                 raise RuntimeError("Provider environment is incomplete")
-            response = call_responses(provider, source, build_prompt(args))
+            response = call_responses(provider, source, build_prompt(args, source))
             image_b64 = extract_image_base64(response)
             if not image_b64:
                 raise RuntimeError("No generated image base64 found in model response.")
@@ -899,7 +929,7 @@ def compression_int(value: str) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="imagegen-workflow-cli", description="Reference-image generation and postprocessing workflow CLI.")
+    parser = argparse.ArgumentParser(prog="imagegen-workflow-cli", description="Image generation, reference-image generation, editing, and postprocessing workflow CLI.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     doctor = subparsers.add_parser("doctor")
@@ -916,7 +946,7 @@ def build_parser() -> argparse.ArgumentParser:
     probe.set_defaults(func=cmd_probe)
 
     generate = subparsers.add_parser("generate")
-    generate.add_argument("--source", required=True)
+    generate.add_argument("--source")
     generate.add_argument("--text", required=True)
     generate.add_argument("--language", required=True)
     generate.add_argument("--width", required=True, type=positive_int)
