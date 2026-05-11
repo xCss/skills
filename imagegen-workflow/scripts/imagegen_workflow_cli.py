@@ -565,6 +565,44 @@ def write_output(path: Path, raw: bytes) -> None:
     path.write_bytes(raw)
 
 
+def resolve_output_format(args: argparse.Namespace) -> str:
+    fmt = (getattr(args, "output_format", None) or "").lower()
+    if fmt:
+        return "jpeg" if fmt == "jpg" else fmt
+    ext = Path(args.out).suffix.lower().lstrip(".")
+    return {"jpg": "jpeg", "jpeg": "jpeg", "webp": "webp", "png": "png"}.get(ext, "png")
+
+
+def mime_for_format(fmt: str) -> str:
+    return {"png": "image/png", "webp": "image/webp", "jpeg": "image/jpeg"}.get(fmt, "image/png")
+
+
+def encode_image(raw: bytes, args: argparse.Namespace) -> tuple[bytes, str]:
+    fmt = resolve_output_format(args)
+    if fmt == "png":
+        return raw, "image/png"
+    from PIL import Image
+
+    quality = getattr(args, "output_compression", None)
+    img = Image.open(io.BytesIO(raw))
+    buf = io.BytesIO()
+    if fmt == "jpeg":
+        if img.mode == "RGBA":
+            background = Image.new("RGB", img.size, (255, 255, 255))
+            background.paste(img, mask=img.split()[3])
+            img = background
+        else:
+            img = img.convert("RGB")
+        img.save(buf, "JPEG", quality=quality if quality is not None else 90, optimize=True)
+        return buf.getvalue(), "image/jpeg"
+    if fmt == "webp":
+        if img.mode not in ("RGB", "RGBA"):
+            img = img.convert("RGBA")
+        img.save(buf, "WEBP", quality=quality if quality is not None else 85, method=6)
+        return buf.getvalue(), "image/webp"
+    return raw, "image/png"
+
+
 def generation_plan(args: argparse.Namespace, provider: dict[str, str], source: Path | None, out: Path) -> dict[str, Any]:
     return {
         "source": str(source) if source is not None else None,
@@ -625,17 +663,17 @@ def cmd_generate(args: argparse.Namespace) -> int:
         return fail("generate", error_code, error_message or "Invalid source configuration", "Pass --source with a readable local image path.", error_detail, 2)
     provider = provider_config(args)
     plan = generation_plan(args, provider, source, out)
-    if args.dry_run or not args.execute:
-        warnings = [] if args.execute else ["dry run only; pass --execute to consume provider API calls and write output"]
+    output_mime = mime_for_format(resolve_output_format(args))
+    if args.dry_run:
         return ok(
             "generate",
             {"model": provider["model"], "plan": plan},
-            warnings,
+            [],
             output=str(out),
             file=str(out),
             provider="responses-compatible",
             model=provider["model"],
-            mime="image/png",
+            mime=output_mime,
         )
     if not provider["base_url"] or not provider["api_key"]:
         return fail("generate", "NO_PROVIDER_CONFIGURED", "Provider configuration is incomplete", "Set CLI args, IMAGEGEN_BASE_URL/IMAGEGEN_API_KEY, BASE_URL/API_KEY, or Codex config/auth.", status=2)
@@ -651,6 +689,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
             dimensions = image_dimensions(probe)
         if dimensions != {"width": args.width, "height": args.height}:
             return fail("generate", "DIMENSION_MISMATCH", "Generated image dimensions do not match the requested canvas", detail={"dimensions": dimensions, "width": args.width, "height": args.height})
+        output, output_mime = encode_image(output, args)
         if args.size_limit and len(output) > args.size_limit:
             return fail("generate", "SIZE_LIMIT_EXCEEDED", "Generated image exceeds the configured size limit", detail={"bytes": len(output), "sizeLimit": args.size_limit})
         write_output(out, output)
@@ -663,7 +702,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
             media=str(out),
             provider="responses-compatible",
             model=provider["model"],
-            mime="image/png",
+            mime=output_mime,
         )
     except Exception as exc:
         return fail("generate", "GENERATION_FAILED", "Image generation failed", detail={"message": str(exc)})
@@ -678,13 +717,12 @@ def cmd_edit(args: argparse.Namespace) -> int:
         return fail("edit", "MASK_NOT_FOUND", "Mask image does not exist", "Pass --mask with a readable PNG mask path.", {"mask": str(Path(args.mask).resolve())}, 2)
     provider = provider_config(args)
     plan = edit_plan(args, provider, source, out)
+    output_mime = mime_for_format(resolve_output_format(args))
     warnings: list[str] = []
     if provider["model"].startswith("gpt-image-2") and args.background == "transparent":
         warnings.append("gpt-image-2 does not support background=transparent in the official Images API; use opaque/auto plus postprocess/background removal")
-    if args.dry_run or not args.execute:
-        if not args.execute:
-            warnings.append("dry run only; pass --execute to consume provider API calls and write output")
-        return ok("edit", {"model": provider["model"], "plan": plan, "prompt": build_edit_prompt(args)}, warnings, output=str(out), file=str(out), provider="responses-compatible", model=provider["model"], mime="image/png")
+    if args.dry_run:
+        return ok("edit", {"model": provider["model"], "plan": plan, "prompt": build_edit_prompt(args)}, warnings, output=str(out), file=str(out), provider="responses-compatible", model=provider["model"], mime=output_mime)
     if not provider["base_url"] or not provider["api_key"]:
         return fail("edit", "NO_PROVIDER_CONFIGURED", "Provider configuration is incomplete", "Set CLI args, IMAGEGEN_BASE_URL/IMAGEGEN_API_KEY, BASE_URL/API_KEY, or Codex config/auth.", status=2)
     try:
@@ -700,6 +738,7 @@ def cmd_edit(args: argparse.Namespace) -> int:
             dimensions = image_dimensions(probe)
         if dimensions != {"width": args.width, "height": args.height}:
             return fail("edit", "DIMENSION_MISMATCH", "Edited image dimensions do not match the requested canvas", detail={"dimensions": dimensions, "width": args.width, "height": args.height})
+        output, output_mime = encode_image(output, args)
         if args.size_limit and len(output) > args.size_limit:
             return fail("edit", "SIZE_LIMIT_EXCEEDED", "Edited image exceeds the configured size limit", detail={"bytes": len(output), "sizeLimit": args.size_limit})
         write_output(out, output)
@@ -712,7 +751,7 @@ def cmd_edit(args: argparse.Namespace) -> int:
             media=str(out),
             provider="responses-compatible",
             model=provider["model"],
-            mime="image/png",
+            mime=output_mime,
         )
     except Exception as exc:
         return fail("edit", "EDIT_FAILED", "Image edit failed", detail={"message": str(exc)})
@@ -791,7 +830,7 @@ def run_batch_item(job: dict[str, Any], defaults: argparse.Namespace) -> dict[st
             if error_code:
                 raise ValueError(error_message)
             provider = provider_config(args)
-            if args.dry_run or not args.execute:
+            if args.dry_run:
                 return {
                     "id": item_id,
                     "command": command,
@@ -807,13 +846,14 @@ def run_batch_item(job: dict[str, Any], defaults: argparse.Namespace) -> dict[st
             if not image_b64:
                 raise RuntimeError("No generated image base64 found in model response.")
             output = postprocess_bytes(base64.b64decode(image_b64), args)
+            output, output_mime = encode_image(output, args)
             write_output(out, output)
             return {
                 "id": item_id,
                 "command": command,
                 "ok": True,
                 "file": str(out),
-                "mime": "image/png",
+                "mime": output_mime,
                 "dimensions": image_dimensions(out),
                 "bytes": len(output),
             }
@@ -821,7 +861,7 @@ def run_batch_item(job: dict[str, Any], defaults: argparse.Namespace) -> dict[st
             source = Path(args.source).resolve()
             out = Path(args.out).resolve()
             provider = provider_config(args)
-            if args.dry_run or not args.execute:
+            if args.dry_run:
                 return {
                     "id": item_id,
                     "command": command,
@@ -838,13 +878,14 @@ def run_batch_item(job: dict[str, Any], defaults: argparse.Namespace) -> dict[st
             if not image_b64:
                 raise RuntimeError("No edited image base64 found in model response.")
             output = postprocess_bytes(base64.b64decode(image_b64), args)
+            output, output_mime = encode_image(output, args)
             write_output(out, output)
             return {
                 "id": item_id,
                 "command": command,
                 "ok": True,
                 "file": str(out),
-                "mime": "image/png",
+                "mime": output_mime,
                 "dimensions": image_dimensions(out),
                 "bytes": len(output),
             }
@@ -963,6 +1004,8 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--text-composite-spec", dest="text_composite_spec")
     generate.add_argument("--preserve-source-alpha", dest="preserve_source_alpha", action="store_true")
     generate.add_argument("--transparent-edge-background", dest="transparent_edge_background", action="store_true")
+    generate.add_argument("--output-format", dest="output_format", choices=["png", "webp", "jpeg"])
+    generate.add_argument("--output-compression", dest="output_compression", type=compression_int)
     generate.set_defaults(func=cmd_generate)
 
     edit = subparsers.add_parser("edit")

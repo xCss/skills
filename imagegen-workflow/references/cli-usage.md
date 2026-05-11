@@ -10,14 +10,19 @@ uv run python scripts/imagegen_workflow_cli.py doctor
 uv run python scripts/imagegen_workflow_cli.py probe
 uv run python scripts/imagegen_workflow_cli.py probe --network --model gpt-image-2
 uv run python scripts/imagegen_workflow_cli.py edit --source source.png --mask mask.png --prompt "Erase the old text and render Start in the same style; keep everything else unchanged" --width 240 --height 80 --out out.png --quality medium --output-format png --dry-run
-uv run python scripts/imagegen_workflow_cli.py edit --source source.png --text "Start" --language en --width 240 --height 80 --out out.png --execute
+uv run python scripts/imagegen_workflow_cli.py edit --source source.png --text "Start" --language en --width 240 --height 80 --out out.png
 uv run python scripts/imagegen_workflow_cli.py generate --text "fresh-blue-icon" --language en --width 240 --height 80 --out out.png --dry-run
-uv run python scripts/imagegen_workflow_cli.py generate --source reference.png --text "Start" --language en --width 240 --height 80 --out out.png --execute
+uv run python scripts/imagegen_workflow_cli.py generate --source reference.png --text "Start" --language en --width 240 --height 80 --out out.png
+uv run python scripts/imagegen_workflow_cli.py generate --text "" --language en --width 768 --height 480 --extra-prompt "isometric cartoon scene" --out cover.webp
 uv run python scripts/imagegen_workflow_cli.py postprocess --generated raw.png --source source.png --width 240 --height 80 --out out.png --preserve-source-alpha
 uv run python scripts/imagegen_workflow_cli.py batch --jobs jobs.json --out report.json
 uv run python scripts/imagegen_workflow_cli.py cleanup /tmp/imagegen-workflow-artifact.png
 uv run python scripts/imagegen_workflow_cli.py self-test
 ```
+
+`generate` and `edit` execute by default; pass `--dry-run` to inspect the plan without spending API calls. `--execute` is accepted but no-op (kept for backwards compatibility).
+
+The output format is detected from the `--out` extension (`.png`, `.webp`, `.jpg`/`.jpeg`). To override or set quality, pass `--output-format png|webp|jpeg` and `--output-compression 0..100`. `generate` and `edit` both apply local re-encoding for non-PNG targets, since the underlying Responses-compatible transport always returns PNG bytes.
 
 ## JSON Contract
 

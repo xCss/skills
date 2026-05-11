@@ -24,13 +24,18 @@ uv run python scripts/imagegen_workflow_cli.py probe
 uv run python scripts/imagegen_workflow_cli.py probe --network
 uv run python scripts/imagegen_workflow_cli.py edit --source source.png --mask mask.png --prompt "Erase the old text and render Start in the same style; keep everything else unchanged" --width 240 --height 80 --out out.png --dry-run
 uv run python scripts/imagegen_workflow_cli.py generate --text "fresh-blue-icon" --language en --width 240 --height 80 --out out.png --dry-run
-uv run python scripts/imagegen_workflow_cli.py generate --source reference.png --text "Start" --language en --width 240 --height 80 --out out.png --dry-run
+uv run python scripts/imagegen_workflow_cli.py generate --source reference.png --text "Start" --language en --width 240 --height 80 --out out.png
+uv run python scripts/imagegen_workflow_cli.py generate --text "" --language en --width 768 --height 480 --extra-prompt "isometric cartoon scene" --out cover.webp
 uv run python scripts/imagegen_workflow_cli.py postprocess --generated raw.png --width 240 --height 80 --out out.png
 uv run python scripts/imagegen_workflow_cli.py batch --jobs jobs.json --out report.json
 uv run python scripts/imagegen_workflow_cli.py cleanup /tmp/imagegen-workflow-artifact.png
 ```
 
 The CLI prints one JSON object to stdout. Diagnostics and human-readable logs must go to stderr. Never write API keys, tokens, cookies, passwords, full Authorization headers, `.env` contents, or connection strings to output.
+
+`generate` and `edit` execute by default and consume provider API calls. Pass `--dry-run` to inspect the plan without spending API calls. The legacy `--execute` flag is still accepted for backwards compatibility but is a no-op.
+
+Output format is detected from the `--out` file extension (`.png`, `.webp`, `.jpg`/`.jpeg`). Override with `--output-format png|webp|jpeg` and tune compression with `--output-compression 0..100`. Both `generate` and `edit` apply local re-encoding when the target is webp/jpeg, since the Responses-compatible image transport returns PNG bytes.
 
 ## Routing
 
@@ -42,7 +47,7 @@ When the configured provider does not expose `/v1/images/edits`, keep the `edit`
 
 If the Responses image path is flaky, retry the same edit/generate job serially before changing the prompt or mask. Treat repeated `502`, `503`, or empty-image-result responses as transport instability, not as proof that the prompt is wrong.
 
-Use `generate --dry-run` to inspect the prompt plan without spending API calls. `generate --source` is optional: omit it for text-only/fresh image generation, and pass it only when the model should use a reference image. Use `generate --execute` only when the task requires a fresh model image rather than editing a source. `--source` is still required with source-dependent postprocessing such as `--preserve-source-alpha` or `--text-composite-spec`. Default provider resolution is `--base-url` / `--api-key`, then `IMAGEGEN_BASE_URL` / `IMAGEGEN_API_KEY`, then `BASE_URL` / `API_KEY`, then Codex provider/base_url files written by tools such as cc-switch: `$CODEX_HOME/config.toml` plus `$CODEX_HOME/auth.json`, or `~/.codex/config.toml` plus `~/.codex/auth.json`. This follows the configured URL; it does not auto-discover a local `127.0.0.1:<port>` proxy. Default model is `IMAGEGEN_MODEL`, then `I18N_IMAGE_MODEL`, then `gpt-image-2`.
+Use `generate --dry-run` to inspect the prompt plan without spending API calls. Without `--dry-run`, `generate` executes immediately and writes the output. `generate --source` is optional: omit it for text-only/fresh image generation, and pass it only when the model should use a reference image. `--source` is still required with source-dependent postprocessing such as `--preserve-source-alpha` or `--text-composite-spec`. Default provider resolution is `--base-url` / `--api-key`, then `IMAGEGEN_BASE_URL` / `IMAGEGEN_API_KEY`, then `BASE_URL` / `API_KEY`, then Codex provider/base_url files written by tools such as cc-switch: `$CODEX_HOME/config.toml` plus `$CODEX_HOME/auth.json`, or `~/.codex/config.toml` plus `~/.codex/auth.json`. This follows the configured URL; it does not auto-discover a local `127.0.0.1:<port>` proxy. Default model is `IMAGEGEN_MODEL`, then `I18N_IMAGE_MODEL`, then `gpt-image-2`.
 
 Use `postprocess` when a generated PNG already exists and needs exact canvas normalization, source-alpha preservation, edge-background transparency cleanup, or text compositing from a JSON spec.
 
@@ -86,6 +91,8 @@ Do not fall back to local text drawing/compositing for model-edit requests unles
 - [ ] `probe` returns JSON and does not call external APIs unless `--network` is passed.
 - [ ] `edit --dry-run` returns a reusable Images Edit plan and writes no image.
 - [ ] `generate --dry-run` returns a reusable plan and writes no image.
+- [ ] `generate` without `--dry-run` executes the API call and writes the output.
+- [ ] `generate --out cover.webp` writes a WebP file (mime `image/webp`).
 - [ ] `postprocess` can normalize PNG dimensions offline.
 - [ ] `batch` runs JSON-described edit/postprocess/generate jobs and writes a report when requested.
 - [ ] `cleanup` removes only explicit non-root paths.
