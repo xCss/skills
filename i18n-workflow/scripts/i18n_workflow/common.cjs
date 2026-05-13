@@ -85,6 +85,45 @@ function resolveRuntimeLanguage(browserLanguages, config) {
   return config.baselineLanguage;
 }
 
+function runtimeConfig(config) {
+  const runtime = config.runtime && typeof config.runtime === 'object' ? config.runtime : {};
+  return {
+    platform: runtime.platform || config.runtimePlatform || 'h5',
+    detector: runtime.detector || config.runtimeLanguageDetector || 'browser-navigator',
+    preferenceStorage: runtime.preferenceStorage || 'localStorage',
+    preferenceKey: runtime.preferenceKey || 'game.language',
+    initBeforeFirstScene: runtime.initBeforeFirstScene === undefined ? false : Boolean(runtime.initBeforeFirstScene),
+  };
+}
+
+function i18nRuntimeConfig(config) {
+  const runtime = config.i18nRuntime && typeof config.i18nRuntime === 'object' ? config.i18nRuntime : {};
+  return {
+    provider: runtime.provider || 'custom-compatible',
+    initFile: runtime.initFile || null,
+    initFunction: runtime.initFunction || 'initI18n',
+    translateFunction: runtime.translateFunction || 't',
+    setLanguageFunction: runtime.setLanguageFunction || 'setLanguage',
+    getLanguageFunction: runtime.getLanguageFunction || 'getLanguage',
+  };
+}
+
+function localeConfig(config) {
+  const locales = config.locales && typeof config.locales === 'object' ? config.locales : {};
+  return {
+    directory: locales.directory || null,
+    format: locales.format || 'json',
+    namespaceMode: locales.namespaceMode || 'optional',
+  };
+}
+
+function simulateBrowserLanguageResolution(config, browserLanguages) {
+  return {
+    input: browserLanguages,
+    resolvedLanguage: resolveRuntimeLanguage(browserLanguages, config),
+  };
+}
+
 function toPosix(value) {
   return value.split(path.sep).join('/');
 }
@@ -152,6 +191,10 @@ module.exports = {
   targetLanguages,
   normalizeLanguageCode,
   resolveRuntimeLanguage,
+  runtimeConfig,
+  i18nRuntimeConfig,
+  localeConfig,
+  simulateBrowserLanguageResolution,
   toPosix,
   rel,
   readJson,

@@ -62,6 +62,64 @@ function writeFixtureConfig() {
   return { tempRoot, configPath, projectRoot, assetsRoot, resourcesRoot, reportDirectory, imagePath };
 }
 
+function writeRuntimeFixtureConfig(overrides = {}) {
+  const fixture = writeFixtureConfig();
+  const supportedLanguages = overrides.supportedLanguages || ['zh', 'en'];
+  const baselineLanguage = overrides.baselineLanguage || 'zh';
+  const fallbackChain = overrides.fallbackChain || ['en', 'zh'];
+  const runtime = {
+    platform: 'h5',
+    detector: 'browser-navigator',
+    preferenceStorage: 'localStorage',
+    preferenceKey: 'game.language',
+    initBeforeFirstScene: true,
+    ...(overrides.runtime || {}),
+  };
+  const i18nRuntime = {
+    provider: 'i18next',
+    initFile: 'assets/scripts/i18n/initI18n.ts',
+    initFunction: 'initI18n',
+    translateFunction: 't',
+    setLanguageFunction: 'setLanguage',
+    getLanguageFunction: 'getLanguage',
+    ...(overrides.i18nRuntime || {}),
+  };
+  const locales = {
+    directory: 'assets/i18n',
+    format: 'json',
+    namespaceMode: 'optional',
+    ...(overrides.locales || {}),
+  };
+  fs.mkdirSync(path.join(fixture.projectRoot, 'assets', 'scripts', 'i18n'), { recursive: true });
+  fs.writeFileSync(path.join(fixture.projectRoot, 'assets', 'scripts', 'i18n', 'initI18n.ts'), 'export function initI18n() {}\nexport function t(key) { return key; }\nexport function setLanguage(lang) { return lang; }\nexport function getLanguage() { return "zh"; }\n');
+  fs.mkdirSync(path.join(fixture.projectRoot, 'assets', 'i18n'), { recursive: true });
+  for (const language of supportedLanguages) {
+    fs.writeFileSync(path.join(fixture.projectRoot, 'assets', 'i18n', `${language}.json`), `${JSON.stringify({ 'common.ok': language === 'zh' ? '确定' : 'OK' }, null, 2)}\n`);
+  }
+  fs.writeFileSync(fixture.configPath, [
+    'const path = require("path");',
+    `const projectRoot = ${JSON.stringify(fixture.projectRoot)};`,
+    'module.exports = {',
+    `  supportedLanguages: ${JSON.stringify(supportedLanguages)},`,
+    `  baselineLanguage: ${JSON.stringify(baselineLanguage)},`,
+    `  fallbackChain: ${JSON.stringify(fallbackChain)},`,
+    '  browserLanguageFallback: "en",',
+    `  runtime: ${JSON.stringify(runtime, null, 2)},`,
+    `  i18nRuntime: ${JSON.stringify(i18nRuntime, null, 2)},`,
+    `  locales: ${JSON.stringify(locales, null, 2)},`,
+    '  projectRoot,',
+    '  assetsRoot: path.join(projectRoot, "assets"),',
+    '  resourcesRoot: path.join(projectRoot, "assets", "resources"),',
+    '  reportDirectory: path.join(projectRoot, "tools", "reports"),',
+    '  getLocales() { return Object.fromEntries(this.supportedLanguages.map(language => [language, { "common.ok": language === "zh" ? "确定" : "OK" }])); },',
+    '  enumerateSourceTextImages() { return []; },',
+    '  resolveTargetPath(sourceResourcesPath, language) { return `i18n_text_sprites/${language}/${sourceResourcesPath}`; },',
+    '  getSpriteFrameMap() { return {}; },',
+    '};',
+  ].join('\n'));
+  return fixture;
+}
+
 function writePrefabKeyFixtureConfig() {
   const fixture = writeFixtureConfig();
   const prefabPath = path.join(fixture.resourcesRoot, 'prefabs', 'HomePage.prefab');
@@ -198,6 +256,50 @@ test('runtime language uses configured fallback when English is not shipped', ()
   };
 
   assert.strictEqual(resolveRuntimeLanguage(['fr-FR'], config), 'zh');
+});
+
+test('runtime language normalizes browser language variants before fallback', () => {
+  const config = {
+    supportedLanguages: ['zh', 'en'],
+    baselineLanguage: 'zh',
+    fallbackChain: ['en', 'zh'],
+  };
+
+  assert.strictEqual(resolveRuntimeLanguage(['zh-CN'], config), 'zh');
+  assert.strictEqual(resolveRuntimeLanguage(['en-US'], config), 'en');
+});
+
+test('runtime step writes H5 standard i18n provider audit report', () => {
+  const fixture = writeRuntimeFixtureConfig();
+  try {
+    const result = runCli(['run', '--config', fixture.configPath, '--steps', 'runtime', '--dry-run']);
+    assert.strictEqual(result.status, 0, result.stderr || result.stdout);
+    const payload = JSON.parse(result.stdout);
+    assert.strictEqual(payload.ok, true);
+    assert.deepStrictEqual(payload.data.steps.map(step => step.name), ['runtime']);
+
+    const report = JSON.parse(fs.readFileSync(path.join(fixture.reportDirectory, 'i18n-runtime-audit.json'), 'utf8'));
+    assert.strictEqual(report.runtime.platform, 'h5');
+    assert.strictEqual(report.i18nRuntime.provider, 'i18next');
+    assert.deepStrictEqual(report.summary.problemCount, 0);
+    assert.strictEqual(report.languageResolutionCases.find(item => item.input.includes('zh-CN')).resolvedLanguage, 'zh');
+    assert.strictEqual(report.languageResolutionCases.find(item => item.input.includes('en-US')).resolvedLanguage, 'en');
+    assert.strictEqual(report.languageResolutionCases.find(item => item.input.includes('fr-FR')).resolvedLanguage, 'en');
+  } finally {
+    fs.rmSync(fixture.tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('runtime step reports first scene initialization problem for H5', () => {
+  const fixture = writeRuntimeFixtureConfig({ runtime: { initBeforeFirstScene: false } });
+  try {
+    const result = runCli(['run', '--config', fixture.configPath, '--steps', 'runtime', '--dry-run']);
+    assert.strictEqual(result.status, 0, result.stderr || result.stdout);
+    const report = JSON.parse(fs.readFileSync(path.join(fixture.reportDirectory, 'i18n-runtime-audit.json'), 'utf8'));
+    assert.match(JSON.stringify(report.problems), /init_before_first_scene_required/);
+  } finally {
+    fs.rmSync(fixture.tempRoot, { recursive: true, force: true });
+  }
 });
 
 test('help describes canonical CLI without legacy tool routing', () => {

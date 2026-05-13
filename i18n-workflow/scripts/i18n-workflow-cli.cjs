@@ -14,6 +14,7 @@ const { runImages } = require(path.join(moduleDir, 'images.cjs'));
 const { runQuality, runCompare } = require(path.join(moduleDir, 'quality.cjs'));
 const { runJobs } = require(path.join(moduleDir, 'jobs.cjs'));
 const { runReview } = require(path.join(moduleDir, 'review.cjs'));
+const { runRuntimeAudit } = require(path.join(moduleDir, 'runtime.cjs'));
 const { resolveResponsesProvider } = require(path.join(moduleDir, 'provider.cjs'));
 
 const COMMANDS = new Set(['doctor', 'probe', 'run', 'cleanup', 'self-test']);
@@ -153,7 +154,7 @@ function doctor(args) {
   if (loaded.error !== undefined) return loaded.error;
   const config = loaded.config;
   const warnings = [];
-  const cliModuleNames = ['common.cjs', 'provider.cjs', 'extract.cjs', 'audit.cjs', 'images.cjs', 'quality.cjs', 'jobs.cjs', 'review.cjs', 'image_ops.py'];
+  const cliModuleNames = ['common.cjs', 'provider.cjs', 'extract.cjs', 'audit.cjs', 'images.cjs', 'quality.cjs', 'jobs.cjs', 'review.cjs', 'runtime.cjs', 'image_ops.py'];
   const cliModules = Object.fromEntries(cliModuleNames.map(name => [name, fs.existsSync(path.join(moduleDir, name))]));
   const checks = {
     node: commandExists('node'),
@@ -167,6 +168,9 @@ function doctor(args) {
     supportedLanguages: Array.isArray(config.supportedLanguages) ? config.supportedLanguages : [],
     baselineLanguage: config.baselineLanguage || null,
     fallbackChain: Array.isArray(config.fallbackChain) ? config.fallbackChain : [],
+    runtime: common.runtimeConfig(config),
+    i18nRuntime: common.i18nRuntimeConfig(config),
+    locales: common.localeConfig(config),
     getLocales: typeof config.getLocales === 'function',
     getSpriteFrameMap: typeof config.getSpriteFrameMap === 'function',
   };
@@ -216,6 +220,14 @@ function probe(args) {
     reportDirectory,
     reportDirectoryWritable,
     localeLanguages,
+    runtime: common.runtimeConfig(config),
+    i18nRuntime: common.i18nRuntimeConfig(config),
+    locales: common.localeConfig(config),
+    languageResolutionPreview: [
+      common.simulateBrowserLanguageResolution(config, ['zh-CN']),
+      common.simulateBrowserLanguageResolution(config, ['en-US']),
+      common.simulateBrowserLanguageResolution(config, ['fr-FR']),
+    ],
     hasApiEnvironment: Boolean(classifyProvider.baseUrl && classifyProvider.apiKey),
     provider: {
       classify: {
@@ -305,6 +317,11 @@ async function run(args, rawArgs) {
   }
 
   try {
+    if (selectedSteps.includes('runtime')) await executeStep('runtime', () => {
+      const report = runRuntimeAudit(config);
+      common.writeReport(config, 'i18n-runtime-audit.json', report);
+      return report;
+    });
     if (selectedSteps.includes('extract')) await executeStep('extract', () => runExtract(config));
     if (selectedSteps.includes('audit')) await executeStep('audit', () => runAudit(config));
     if (selectedSteps.includes('generate')) await executeStep('generate', () => runImages(config, args['dry-run'] ? passthrough : [...passthrough, '--generate', '--execute']));
