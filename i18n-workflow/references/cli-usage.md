@@ -8,6 +8,7 @@
 node scripts/i18n-workflow-cli.cjs --help
 node scripts/i18n-workflow-cli.cjs doctor --config tools/i18n-workflow.config.cjs
 node scripts/i18n-workflow-cli.cjs probe --config tools/i18n-workflow.config.cjs
+node scripts/i18n-workflow-cli.cjs run --config tools/i18n-workflow.config.cjs --steps runtime --dry-run
 node scripts/i18n-workflow-cli.cjs run --config tools/i18n-workflow.config.cjs --steps extract,audit,jobs,review --dry-run
 node scripts/i18n-workflow-cli.cjs cleanup tools/reports/.tmp-i18n-images
 node scripts/i18n-workflow-cli.cjs self-test
@@ -53,5 +54,9 @@ Failure:
 ## Implementation Modules
 
 The skill no longer exposes `tools/*.cjs` execution entries. New automation must call `scripts/i18n-workflow-cli.cjs`; implementation modules are internal and live under `scripts/i18n_workflow/`.
+
+## Standard Runtime Audit
+
+Use `run --steps runtime --dry-run` to validate the generic B-scheme i18n runtime contract for H5 games. The step writes `i18n-runtime-audit.json` into the configured report directory and checks browser language resolution, provider entry names, locale directory configuration, and whether H5 language initialization is declared before the first real UI scene.
 
 See [migration-assessment.md](migration-assessment.md) for the migration score and completed removal notes.

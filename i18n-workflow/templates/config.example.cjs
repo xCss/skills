@@ -28,6 +28,32 @@ module.exports = {
   // 如果当前工作区尚未发布 en，本值会被工具忽略并继续使用 fallbackChain/baseline。
   browserLanguageFallback: 'en',
 
+  // --- Standard i18n Runtime (H5 / B 方案) ---
+  // 这部分用于检查标准 i18n runtime 是否能在首个真实 UI 场景前完成语言初始化。
+  // provider 可以是 i18next、typesafe-i18n，或暴露同等接口的项目自研 runtime。
+  runtime: {
+    platform: 'h5',
+    detector: 'browser-navigator',
+    preferenceStorage: 'localStorage',
+    preferenceKey: 'game.language',
+    initBeforeFirstScene: true,
+  },
+
+  i18nRuntime: {
+    provider: 'custom-compatible',
+    initFile: 'assets/scripts/i18n/initI18n.ts',
+    initFunction: 'initI18n',
+    translateFunction: 't',
+    setLanguageFunction: 'setLanguage',
+    getLanguageFunction: 'getLanguage',
+  },
+
+  locales: {
+    directory: 'assets/i18n',
+    format: 'json',
+    namespaceMode: 'optional',
+  },
+
   // --- Paths (project-relative, POSIX separators) ---
   projectRoot,
   assetsRoot: path.join(projectRoot, 'assets'),
