@@ -1018,6 +1018,7 @@ function imagegenWorkflowError(result, payload) {
 function imagegenWorkflowEnv() {
   return {
     ...process.env,
+    PYTHONIOENCODING: process.env.PYTHONIOENCODING || 'utf-8',
     UV_PROJECT_ENVIRONMENT: process.env.UV_PROJECT_ENVIRONMENT || path.join(os.tmpdir(), 'imagegen-workflow-venv'),
     UV_LINK_MODE: process.env.UV_LINK_MODE || 'copy',
   };
