@@ -4,11 +4,10 @@ Generate legacy-style Bilibili poster images or HTML previews from a Bilibili UR
 
 ## What this skill provides
 
-- A stable Skill + CLI workflow for Bilibili poster generation.
+- Stable Skill + CLI workflow for Bilibili poster generation.
 - JSON-only CLI output for agent automation.
-- Offline fixture rendering for tests and reproducible layout work.
-- PNG export through Playwright Chromium.
-- Safe cleanup for generated temp-directory artifacts.
+- Offline fixture rendering and Playwright PNG export.
+- Safe cleanup for generated temp artifacts.
 
 ## Install
 
@@ -64,7 +63,7 @@ python scripts/bilibili_publish_cli.py generate --url 'BV...' --format png --out
 python scripts/bilibili_publish_cli.py cleanup /tmp/poster.png /tmp/poster_assets
 ```
 
-All subcommands emit one JSON object to stdout. Read `ok`, `command`, `warnings`, and either `output`, `file`, `media`, or `data`. Failures return `ok: false` with `error.code` and `error.message`.
+All subcommands emit one JSON object to stdout. Read `ok`, `command`, `warnings`, and either `output`, `file`, `media`, or `data`.
 
 ## Chromium requirement
 
@@ -95,8 +94,7 @@ Fixture mode disables remote asset downloads even when `--allow-remote-assets` i
 ## Layout guardrails
 
 - Preserve the legacy long-image layout unless the user explicitly asks for redesign.
-- Keep the Bilibili icon/wordmark in the left metadata column.
-- Keep the QR panel aligned with metadata and preserve a generous QR quiet zone.
+- Keep the icon/wordmark in the left metadata column and the QR panel aligned with metadata.
 - Truncate comments or use DOM-height screenshots so the footer remains visible.
 - Preserve real user-supplied `b23.tv/<token>` shortlinks.
 
