@@ -1,6 +1,6 @@
 # imagegen Workflow Provider Resolution
 
-Provider credentials are required only for `edit --execute`, `generate --execute`, `batch --execute` with edit/generate jobs, and `probe --network`. Local commands such as `doctor`, `probe`, `edit --dry-run`, `generate --dry-run`, `postprocess`, `batch` with dry-run/offline postprocess jobs, `cleanup`, and `self-test` must not make paid or external API calls.
+Provider credentials are required for real `edit`, `generate`, batch edit/generate jobs, and `probe --network`. Local commands such as `doctor`, `probe`, `edit --dry-run`, `generate --dry-run`, `postprocess`, dry-run/offline batch jobs, `cleanup`, and `self-test` must not make paid or external API calls.
 
 ## Resolution Order
 
@@ -24,4 +24,4 @@ This fallback follows whatever `base_url` is configured in Codex. If cc-switch w
 
 Do not store credentials in `SKILL.md`, references, generated reports, tests, or committed config files. Do not print API keys, tokens, cookies, passwords, full Authorization headers, `.env` contents, or connection strings. If a credential must be described, write `[REDACTED]`.
 
-Before running `edit --execute`, `generate --execute`, or `batch --execute` with edit/generate jobs, tell the user it may consume provider API calls. Use `edit --dry-run`, `generate --dry-run`, or batch dry-run jobs first when practical.
+`edit` and `generate` execute by default; use `--dry-run` for previews. Treat the user's request for real image output as consent to execute, while still redacting credentials and reporting provider failures safely.
