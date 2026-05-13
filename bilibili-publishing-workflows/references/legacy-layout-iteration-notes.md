@@ -18,7 +18,7 @@ Session-derived notes for reproducing the user's expected legacy `bilibili-video
 
 ## Implementation pattern
 
-The migrated implementation lives in `scripts/bilibili_publish_cli.py`; update that CLI and the checked-in templates rather than recreating the removed legacy generator or inventing a new PIL/card design. Use supplied raster assets when available:
+The implementation lives in `scripts/bilibili_publish_cli.py` and the checked-in templates. Update those files rather than generating a new ad-hoc PIL/card design. Use supplied raster assets when available:
 
 - `--icon` for the Bilibili icon image.
 - `--wordmark` for the Bilibili wordmark/brand lettering.
