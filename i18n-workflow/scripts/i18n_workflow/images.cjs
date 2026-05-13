@@ -1083,6 +1083,162 @@ function runImagegenWorkflowGenerate(candidate, language, text) {
   }
 }
 
+function editMaskPath(candidate) {
+  if (!candidate) return null;
+  if (candidate.mask && typeof candidate.mask === 'string') return path.isAbsolute(candidate.mask) ? candidate.mask : path.join(projectRoot, candidate.mask);
+  if (candidate.textComposite && typeof candidate.textComposite === 'object' && candidate.textComposite.mask) {
+    return path.isAbsolute(candidate.textComposite.mask) ? candidate.textComposite.mask : path.join(projectRoot, candidate.textComposite.mask);
+  }
+  return null;
+}
+
+function autoEditMaskPath(candidate, tempDir, token) {
+  const maskPath = path.join(tempDir, `${token}-auto-edit-mask.png`);
+  const sourcePath = path.join(projectRoot, candidate.sourceImagePath);
+  const textComposite = candidate.textComposite && typeof candidate.textComposite === 'object' ? candidate.textComposite : {};
+  const textRects = [];
+  for (const rect of [...(textComposite.textRects || []), ...(textComposite.clearRects || [])]) {
+    if (Array.isArray(rect) && rect.length >= 4) textRects.push(rect.slice(0, 4).map(v => Number(v) || 0));
+  }
+  if (textComposite.textRect && Array.isArray(textComposite.textRect)) textRects.push(textComposite.textRect.slice(0, 4).map(v => Number(v) || 0));
+  if (textComposite.clearRect && Array.isArray(textComposite.clearRect)) textRects.push(textComposite.clearRect.slice(0, 4).map(v => Number(v) || 0));
+
+  const specPath = path.join(tempDir, `${token}-auto-mask-spec.json`);
+  fs.writeFileSync(specPath, `${JSON.stringify({ sourcePath, width: candidate.width, height: candidate.height, textRects, textComposite }, null, 2)}\n`);
+
+  const script = [
+    'from PIL import Image, ImageFilter',
+    'import json, sys',
+    'spec_path, out_path = sys.argv[1], sys.argv[2]',
+    'spec = json.load(open(spec_path, encoding="utf-8"))',
+    'src = Image.open(spec["sourcePath"]).convert("RGBA")',
+    'w, h = src.size',
+    'mask = Image.new("RGBA", (w, h), (0, 0, 0, 0))',
+    'px = src.load()',
+    'mx = mask.load()',
+    'def clamp(v, lo, hi):',
+    '    return max(lo, min(hi, int(v)))',
+    'def add_rect(rect, pad=4):',
+    '    x, y, rw, rh = [int(v) for v in rect]',
+    '    x0 = clamp(x - pad, 0, w - 1)',
+    '    y0 = clamp(y - pad, 0, h - 1)',
+    '    x1 = clamp(x + rw + pad, 0, w - 1)',
+    '    y1 = clamp(y + rh + pad, 0, h - 1)',
+    '    for yy in range(y0, y1 + 1):',
+    '        for xx in range(x0, x1 + 1):',
+    '            mx[xx, yy] = (255, 255, 255, 255)',
+    'def alpha_mask():',
+    '    filled = 0',
+    '    for yy in range(h):',
+    '        for xx in range(w):',
+    '            r, g, b, a = px[xx, yy]',
+    '            if a > 8:',
+    '                mx[xx, yy] = (255, 255, 255, 255)',
+    '                filled += 1',
+    '    return filled',
+    'def luminance(c):',
+    '    r, g, b, a = c',
+    '    return (r * 299 + g * 587 + b * 114) / 1000',
+    'def chroma(c):',
+    '    r, g, b, a = c',
+    '    return max(r, g, b) - min(r, g, b)',
+    'def source_heuristic_mask():',
+    '    seeds = []',
+    '    for yy in range(h):',
+    '        for xx in range(w):',
+    '            r, g, b, a = px[xx, yy]',
+    '            if a <= 8:',
+    '                continue',
+    '            lum = luminance((r, g, b, a))',
+    '            ch = chroma((r, g, b, a))',
+    '            is_dark_text = lum < 132',
+    '            is_light_text = lum > 170 and ch < 95',
+    '            is_yellow_text = r >= 135 and g >= 85 and b <= 135 and r + 45 >= g',
+    '            if is_dark_text or is_light_text or is_yellow_text:',
+    '                seeds.append((xx, yy))',
+    '    for x, y in seeds:',
+    '        for yy in range(max(0, y - 3), min(h, y + 4)): ',
+    '            for xx in range(max(0, x - 3), min(w, x + 4)):',
+    '                mx[xx, yy] = (255, 255, 255, 255)',
+    '    return len(seeds)',
+    'rects = spec.get("textRects") or []',
+    'if rects:',
+    '    for rect in rects:',
+    '        add_rect(rect, 4)',
+    'else:',
+    '    if alpha_mask() == 0:',
+    '        source_heuristic_mask()',
+    'mask = mask.filter(ImageFilter.GaussianBlur(radius=1))',
+    'mask.save(out_path, optimize=True)',
+  ].join('\n');
+
+  const result = spawnSync('uv', ['run', '--with', 'pillow', 'python', '-c', script, specPath, maskPath], {
+    cwd: projectRoot,
+    encoding: 'utf8',
+  });
+
+  if (result.status !== 0) {
+    throw new Error(`uv/Pillow auto edit mask generation failed: ${(result.stderr || result.stdout || '').slice(0, 1000)}`);
+  }
+
+  fs.rmSync(specPath, { force: true });
+  return maskPath;
+}
+
+function resolveEditMask(candidate, tempDir, token) {
+  const explicitMask = editMaskPath(candidate);
+  if (explicitMask && fs.existsSync(explicitMask)) return explicitMask;
+  return autoEditMaskPath(candidate, tempDir, token);
+}
+
+function runImagegenWorkflowEdit(candidate, language, text) {
+  const extraGuidance = generationGuidance(candidate, language);
+  const tempDir = path.join(projectRoot, 'tools', 'reports', '.tmp-i18n-images');
+  fs.mkdirSync(tempDir, { recursive: true });
+  const token = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const outputPath = path.join(tempDir, `${token}-imagegen-workflow-edit.png`);
+  const guidancePath = path.join(tempDir, `${token}-imagegen-guidance.txt`);
+  const guidance = [
+    'i18n-workflow context: the source image is a Cocos Creator UI asset.',
+    'Edit only the masked text region. Preserve all non-text background, button, ribbon, glow, and transparent areas exactly.',
+    'The localized text should be about the same visual height as the Chinese text in the source image. Do not make it smaller just because the translated phrase is longer.',
+    'If the translation is longer, use a condensed font, tighter tracking, or multiple lines while preserving the original text area and readable size.',
+    'Do not render tiny text centered on a large empty bar. Do not crop or change the image resolution.',
+    'For Arabic, render readable right-to-left Arabic text with correct letter shaping and the same visual scale as the Chinese source text.',
+    'Do not add extra decorative elements. Keep the file lightweight for H5.',
+    candidate.generationHint ? `Project-specific visual instruction: ${candidate.generationHint}` : '',
+    extraGuidance || '',
+  ].filter(Boolean).join('\n');
+  fs.writeFileSync(guidancePath, guidance, 'utf8');
+
+  const maskPath = resolveEditMask(candidate, tempDir, token);
+  if (!maskPath || !fs.existsSync(maskPath)) {
+    throw new Error(`Edit mask not found for ${candidate.sourceImagePath}.`);
+  }
+
+  try {
+    runImagegenWorkflow([
+      'edit',
+      '--source', path.join(projectRoot, candidate.sourceImagePath),
+      '--mask', maskPath,
+      '--text', text,
+      '--language', language,
+      '--width', String(candidate.width),
+      '--height', String(candidate.height),
+      '--out', outputPath,
+      '--model', process.env.I18N_IMAGE_MODEL || 'gpt-image-2',
+      '--guidance-file', guidancePath,
+      '--execute',
+    ]);
+    const buffer = fs.readFileSync(outputPath);
+    fs.rmSync(outputPath, { force: true });
+    return buffer;
+  } finally {
+    fs.rmSync(guidancePath, { force: true });
+    fs.rmSync(outputPath, { force: true });
+  }
+}
+
 function runImagegenWorkflowPostprocess(buffer, candidate) {
   const tempDir = path.join(projectRoot, 'tools', 'reports', '.tmp-i18n-images');
   fs.mkdirSync(tempDir, { recursive: true });
@@ -1116,7 +1272,7 @@ function runImagegenWorkflowPostprocess(buffer, candidate) {
 }
 
 async function generateWithModel(candidate, language, text) {
-  return runImagegenWorkflowGenerate(candidate, language, text);
+  return runImagegenWorkflowEdit(candidate, language, text);
 }
 
 function translationKey(candidate) {
