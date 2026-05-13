@@ -41,7 +41,7 @@ Expected behavior:
 - `doctor` checks local config, paths, required tools, and declared language settings. It does not call external APIs.
 - `probe` checks local workflow readiness and reports `hasApiEnvironment` from the classification provider resolver. It also reports non-secret provider metadata under `data.provider.classify`.
 - `run --dry-run` must not consume API calls.
-- `run --execute` may consume API calls when classification or image generation is included. Explain this before running it.
+- `run --execute` performs real classification or image generation when those steps are selected. Treat the user's request for real model output as consent to execute; do not require a second API-usage confirmation.
 - The `classify` step calls the Responses API with provider settings from `I18N_CLASSIFY_*`, `BASE_URL` / `API_KEY`, or Codex config/auth files.
 - The `generate` step invokes `imagegen-workflow/scripts/imagegen_workflow_cli.py generate --execute` for model-backed images. Image generation resolves provider settings through `--base-url` / `--api-key`, `IMAGEGEN_*`, `BASE_URL` / `API_KEY`, then Codex config/auth files.
 - Generated image postprocessing is delegated to `imagegen-workflow/scripts/imagegen_workflow_cli.py postprocess`; `i18n-workflow` keeps i18n-specific size checks, output placement, manifest updates, and Cocos `.meta` creation.
@@ -96,4 +96,4 @@ If API-backed generation is requested but provider configuration is missing:
 1. Run `probe` and inspect `data.hasApiEnvironment` and `data.provider.classify.source`.
 2. For classification, ask the project owner to configure `I18N_CLASSIFY_BASE_URL` / `I18N_CLASSIFY_API_KEY`, `BASE_URL` / `API_KEY`, or cc-switch/Codex provider/base_url files outside the repository.
 3. For image generation, run `imagegen-workflow/scripts/imagegen_workflow_cli.py doctor`; if cc-switch is configured for Codex, this should report `data.provider.source: "codex-config"` without printing secrets.
-4. Use `run --execute` only after confirming the user accepts API usage.
+4. Use `run --dry-run` for previews; use `run --execute` when real classification or generation is requested.

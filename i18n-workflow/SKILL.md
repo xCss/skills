@@ -77,7 +77,7 @@ The agent should call this CLI instead of writing temporary Node, Python, or she
 5. For H5 standard-runtime work, run `run --steps runtime --dry-run` before text/image audits. Language must be resolved before the first real UI scene.
 6. Use existing report JSON from the configured `reportDirectory` for conclusions. After `extract`, inspect `runtimeKeyCoverage`; after `audit`, report exact `textImageCandidatesWithoutI18nMap` candidates, not only counts.
 7. Use `cleanup` only for explicit temporary paths.
-8. For API-backed image generation, explain that `--execute` consumes API calls before running it.
+8. Use `--dry-run` for previews. When the user asks for real classification or image generation, execute without a second API-usage confirmation.
 9. For generated text-images, run a retry loop before acceptance: generate/edit -> normalize/crop to the source canvas -> clean alpha/white/gray fringe artifacts -> inspect source/target contact sheet -> regenerate or patch failures.
 10. For runtime UI, verify language coverage in every visible state, not just the default state: hidden labels, off/on toggles, popups, buttons, and embedded-text sprites must all be checked in-game.
 
