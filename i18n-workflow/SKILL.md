@@ -16,7 +16,7 @@ This skill routes game localization work through a stable CLI instead of ad-hoc 
 
 Translation quality rule: keep translations as short and accurate as possible without losing the original meaning, while still sounding natural in the target language.
 
-Localized text-image rule: model output is only the first draft. Before accepting it, post-process and visually verify alpha edges, white/gray fringes, source-language residue, canvas fit, and UI-state coverage.
+Localized text-image rule: model output is only the first draft. Before accepting it, post-process and visually verify alpha edges, white/gray fringes, source-language residue, canvas fit, and UI-state coverage. If a project does not ship an explicit mask for a text sprite, derive a temporary edit mask from the source image and any available text geometry before calling image edit.
 
 Runtime language rule: when browser auto-detection (`navigator.languages` / `navigator.language`) fails to match a shipped language, fall back to English (`en`) before the baseline/source language. If `en` is not shipped in the current worktree, keep the configured fallback chain/baseline.
 
@@ -78,7 +78,7 @@ The agent should call this CLI instead of writing temporary Node, Python, or she
 6. Use existing report JSON from the configured `reportDirectory` for conclusions. After `extract`, inspect `runtimeKeyCoverage`; after `audit`, report exact `textImageCandidatesWithoutI18nMap` candidates, not only counts.
 7. Use `cleanup` only for explicit temporary paths.
 8. For API-backed image generation, explain that `--execute` consumes API calls before running it.
-9. For generated text-images, run a retry loop before acceptance: generate -> normalize/crop to the source canvas -> clean alpha/white/gray fringe artifacts -> inspect source/target contact sheet -> regenerate or patch failures.
+9. For generated text-images, run a retry loop before acceptance: generate/edit -> normalize/crop to the source canvas -> clean alpha/white/gray fringe artifacts -> inspect source/target contact sheet -> regenerate or patch failures.
 10. For runtime UI, verify language coverage in every visible state, not just the default state: hidden labels, off/on toggles, popups, buttons, and embedded-text sprites must all be checked in-game.
 
 Migration rationale and the complete CLI boundary are recorded in [references/migration-assessment.md](references/migration-assessment.md). Provider and credential handling for image generation are documented in [references/provider-resolution.md](references/provider-resolution.md).
@@ -151,6 +151,7 @@ Never print API keys, tokens, cookies, passwords, full Authorization headers, or
 - Do not mix runtime fallback, locale key fallback, and text-image asset fallback into one summary; report them as separate layers.
 - Do not summarize image localization as a count only; list candidates from `candidateReport` or `i18n-asset-audit.json` that need human decision.
 - Do not treat model-generated images as final just because the file exists; inspect alpha, white/gray edges, residue, style drift, and actual runtime state.
+- Do not require project-side mask assets for text sprites; when explicit masks are absent, synthesize a temporary mask from source geometry or source-image heuristics and then call image edit.
 - Do not leave source-language UI labels hidden under sprites or inside off/on toggle tracks; remove, hide, or map them deliberately and verify in the running UI.
 - Do not mix debug noise into stdout; the CLI must keep stdout machine-readable JSON.
 - Do not recreate deleted skill-level `tools/*.cjs` entry points; `scripts/i18n-workflow-cli.cjs` is the only supported execution surface.

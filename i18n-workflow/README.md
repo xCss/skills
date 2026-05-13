@@ -148,6 +148,7 @@ For each target language needing a localized text image:
 - Preserve background, transparency, button/ribbon style.
 - Replace embedded text with the translated string.
 - Use concise target text that preserves meaning and fits the source composition.
+- If an explicit text mask is not provided by the project, derive a temporary mask from the source image and any available text geometry, then use image edit instead of full regeneration.
 
 Model-backed classification and generation resolve provider settings from domain-specific env, shared `BASE_URL` / `API_KEY`, or Codex provider/base_url and auth files written by tools such as cc-switch. This follows the configured URL; it does not auto-discover a local `127.0.0.1:<port>` proxy. Requests run with concurrency 10 by default and can be capped with `--concurrency=<1-10>`. If the user specifies a quality range such as `qlt=60~80`, keep exported/generated review assets inside that range unless the provider requires otherwise.
 
@@ -165,6 +166,7 @@ Validate generated images against the manifest:
 Model output must be normalized before it is considered usable:
 
 - Crop, pad, or scale to the source canvas.
+- When no project mask exists, derive a temporary edit mask from the source image or text geometry before calling image edit.
 - Remove white/gray fringe pixels, white square backgrounds, and low-saturation halo artifacts around text or signs.
 - Remove source-language ghost text/residue without damaging the translated text, stroke, shadow, or background.
 - Recenter text or artwork when model output is visibly too small or off-center.

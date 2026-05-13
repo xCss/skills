@@ -55,6 +55,8 @@ module.exports = {
 
   // --- Text-Image Source ---
   // Returns an array of { imagePath, width, height, spriteFrameUuid, resourcesPath }
+  // Each candidate may optionally carry `mask` or `textComposite` metadata.
+  // When absent, i18n-workflow may synthesize a temporary edit mask from source geometry or source-image heuristics.
   enumerateSourceTextImages: () => [],
 
   // --- Localized Image Target ---
@@ -189,6 +191,8 @@ Treat `runtimeKeyCoverage.missing` as a required review item when the project us
       "sourceBytes": 12345,
       "detectionStatus": "text | non_text | uncertain",
       "embeddedText": "string | null",
+      "mask": "path/to/mask.png | null",
+      "textComposite": { /* optional edit geometry */ } | null,
       "targets": {
         "<lang>": {
           "resourcesPath": "i18n_text_sprites/<lang>/...",
