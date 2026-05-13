@@ -27,6 +27,8 @@ The current-worktree boundary is strict: audits describe files that exist now. D
 Use this skill when the user asks to:
 
 - audit i18n, locale keys, fallback coverage, or missing translations
+- set up or audit a standard i18n runtime for H5 games, including i18next, typesafe-i18n, or a compatible project runtime
+- diagnose browser language detection, localStorage language preference, runtime fallback, or first-frame source-language flash
 - add or verify a language such as English, Arabic, Vietnamese, Japanese, or Korean
 - find hardcoded user-facing strings in game UI files
 - identify, generate, audit, compare, or regenerate localized text-image assets
@@ -72,11 +74,12 @@ The agent should call this CLI instead of writing temporary Node, Python, or she
 2. Run `doctor` before assuming a project is bound to the workflow.
 3. Run `probe` before expensive or multi-step work.
 4. Use `run` for workflow stages; pass `--steps` to limit scope.
-5. Use existing report JSON from the configured `reportDirectory` for conclusions. After `extract`, inspect `runtimeKeyCoverage`; after `audit`, report exact `textImageCandidatesWithoutI18nMap` candidates, not only counts.
-6. Use `cleanup` only for explicit temporary paths.
-7. For API-backed image generation, explain that `--execute` consumes API calls before running it.
-8. For generated text-images, run a retry loop before acceptance: generate -> normalize/crop to the source canvas -> clean alpha/white/gray fringe artifacts -> inspect source/target contact sheet -> regenerate or patch failures.
-9. For runtime UI, verify language coverage in every visible state, not just the default state: hidden labels, off/on toggles, popups, buttons, and embedded-text sprites must all be checked in-game.
+5. For H5 standard-runtime work, run `run --steps runtime --dry-run` before text/image audits. Language must be resolved before the first real UI scene.
+6. Use existing report JSON from the configured `reportDirectory` for conclusions. After `extract`, inspect `runtimeKeyCoverage`; after `audit`, report exact `textImageCandidatesWithoutI18nMap` candidates, not only counts.
+7. Use `cleanup` only for explicit temporary paths.
+8. For API-backed image generation, explain that `--execute` consumes API calls before running it.
+9. For generated text-images, run a retry loop before acceptance: generate -> normalize/crop to the source canvas -> clean alpha/white/gray fringe artifacts -> inspect source/target contact sheet -> regenerate or patch failures.
+10. For runtime UI, verify language coverage in every visible state, not just the default state: hidden labels, off/on toggles, popups, buttons, and embedded-text sprites must all be checked in-game.
 
 Migration rationale and the complete CLI boundary are recorded in [references/migration-assessment.md](references/migration-assessment.md). Provider and credential handling for image generation are documented in [references/provider-resolution.md](references/provider-resolution.md).
 
@@ -85,6 +88,8 @@ Migration rationale and the complete CLI boundary are recorded in [references/mi
 | User intent | CLI command |
 |---|---|
 | “检查配置 / 能不能跑” | `doctor` then `probe` |
+| “检查 H5 语言初始化 / 首屏防闪” | `run --steps runtime --dry-run` |
+| “检查标准 i18n runtime 接入” | `doctor`, `probe`, then `run --steps runtime,extract,audit --dry-run` |
 | “跑 i18n 审计” | `run --steps extract,audit --dry-run` |
 | “提取硬编码文本” | `run --steps extract --dry-run` |
 | “检查 Cocos prefab key 覆盖” | configure `sourceTextToKey`/`getRuntimeTextKeyMap`, then `run --steps extract --dry-run` |
@@ -137,9 +142,13 @@ Never print API keys, tokens, cookies, passwords, full Authorization headers, or
 ## Common Pitfalls
 
 - Do not add `en`, `ar`, `vi`, or any language to `supportedLanguages` unless the current worktree actually ships that language.
+- Do not launch any non-zh language without checking realistic text length, glyph/diacritic coverage, placeholder word order, punctuation/spacing, and constrained UI overflow in runtime.
+- Do not launch Arabic (`ar`) or other RTL languages without the additional RTL runtime checks for direction, shaping, mixed LTR fragments, and mirrored UI states.
 - Do not use Git history to fill current-worktree audits unless the user requested a historical audit.
 - Do not make the agent reconstruct locale coverage or image manifests manually when the CLI can run the workflow.
 - Do not accept synthetic extracted keys as final runtime keys when the project has canonical runtime keys; bind `sourceTextToKey` or `getRuntimeTextKeyMap` and review `runtimeKeyCoverage.missing`.
+- Do not let H5 games render the first real UI scene before runtime language resolution and locale provider initialization; use a loading scene if async locale loading is required.
+- Do not mix runtime fallback, locale key fallback, and text-image asset fallback into one summary; report them as separate layers.
 - Do not summarize image localization as a count only; list candidates from `candidateReport` or `i18n-asset-audit.json` that need human decision.
 - Do not treat model-generated images as final just because the file exists; inspect alpha, white/gray edges, residue, style drift, and actual runtime state.
 - Do not leave source-language UI labels hidden under sprites or inside off/on toggle tracks; remove, hide, or map them deliberately and verify in the running UI.

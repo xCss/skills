@@ -45,6 +45,7 @@ Audits describe the current working tree by default. Do not add languages or spr
 
 This playbook covers:
 
+- Standard H5 i18n runtime setup and audit for providers such as `i18next`, `typesafe-i18n`, or compatible project runtimes.
 - Runtime language detection and fallback.
 - Locale text key coverage auditing.
 - Text-image resource generation at source-spec dimensions.
@@ -58,6 +59,24 @@ This playbook covers:
 Translation quality rule: translations should be as short and accurate as possible without losing the intended meaning, while still matching the target language's natural usage.
 
 It does **not** assume any specific engine, directory layout, or runtime configuration file. Project-specific bindings are declared in an adapter/config (see [contracts.md](contracts.md)).
+
+## Standard Runtime Workflow
+
+For B-scheme projects that use a standard i18n runtime, run the workflow in this order:
+
+1. Probe the project adapter, runtime declaration, provider declaration, and locale paths.
+2. Resolve browser language before the first real UI scene (`navigator.languages` / `navigator.language`, after any saved user preference).
+3. Initialize the locale provider (`initI18n`, `t`, `setLanguage`, `getLanguage`, or compatible names).
+4. Audit hardcoded text and runtime key coverage.
+5. Audit runtime fallback behavior separately from key/resource fallback.
+6. Optionally audit/generate embedded text images.
+7. Verify the H5 runtime does not flash source-language text before applying the target language.
+
+Command:
+
+```bash
+node scripts/i18n-workflow-cli.cjs run --config tools/i18n-workflow.config.cjs --steps runtime --dry-run
+```
 
 ## Language Model
 
@@ -191,3 +210,8 @@ Run the game in the target environment. Confirm:
 7. Post-process generated assets and rerun comparison/retry jobs until clean.
 8. Complete human review checklist.
 9. Verify in runtime across default and alternate UI states.
+
+Language-specific gates:
+
+- Every non-zh language must pass realistic string-length, glyph/diacritic, placeholder word-order, punctuation/spacing, constrained-layout, and runtime-browser checks.
+- Arabic (`ar`) and other RTL languages must also pass direction, shaping, mixed-number/Latin-fragment, and mirrored-layout checks.

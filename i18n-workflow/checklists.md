@@ -18,6 +18,7 @@ Reusable human-review checklists. Not project-specific.
 - [ ] Runtime language detection picks the new language when the environment matches.
 - [ ] Fallback chain works: removing the new language's resources falls back correctly.
 - [ ] Language toggle/switch UI includes the new language.
+- [ ] Non-zh language risk checklist is complete for every target language: all non-zh languages use the expansion/glyph/runtime checklist; RTL languages additionally use the RTL checklist.
 - [ ] No missing sprite-frame or resource errors in console.
 - [ ] Default and alternate UI states are checked: popups, settings, hidden labels, off/on toggles, disabled states, and dynamic runtime labels.
 
@@ -62,11 +63,22 @@ Reusable human-review checklists. Not project-specific.
 
 ## RTL Language Checklist
 
-- [ ] Arabic (or other RTL) text renders right-to-left.
+- [ ] Arabic (`ar`) or other RTL text renders right-to-left in labels, buttons, popups, toasts, and generated text images.
 - [ ] Letter shaping and ligatures are correct.
 - [ ] Text alignment is mirrored where appropriate.
 - [ ] UI layout direction is handled by the runtime (if applicable).
 - [ ] Numbers and Latin fragments remain LTR within RTL flow.
+- [ ] Icon order, back/next arrows, progress indicators, and horizontal lists are mirrored only when the product UX requires mirroring.
+- [ ] Runtime verification covers Arabic in actual H5/browser output, not only static prefab/scene files.
+
+## Non-zh Language Expansion/Glyph Checklist
+
+- [ ] Every non-zh language is tested against realistic long strings, not only short placeholder translations.
+- [ ] Text overflow/clipping is checked for every non-zh language in labels, buttons, popups, settings rows, reward panels, and generated text images.
+- [ ] Dynamic strings with placeholders (`{count}`, `{level}`, `{time}`) are tested with large values and natural translated word order.
+- [ ] Font coverage includes all target-language glyphs, diacritics, accents, punctuation, and currency/number symbols; missing glyph boxes are treated as blocking defects.
+- [ ] Auto-fit, wrapping, truncation, or alternate copy is explicitly chosen for each constrained UI area; silent clipping is not accepted.
+- [ ] Language-specific casing, punctuation, spacing, plural/quantity forms, and word order are verified when the target language needs them.
 
 ## Fallback Behavior Checklist
 
@@ -82,3 +94,4 @@ Reusable human-review checklists. Not project-specific.
 - [ ] Toggle/switch off and on tracks are localized or text-free as intended.
 - [ ] Dynamic messages, rank/name fields, unlock prompts, and toast text use runtime i18n keys.
 - [ ] Arabic/RTL screens are checked in the actual runtime, not only in static files.
+- [ ] Every non-zh screen is checked with realistic strings and dynamic values in the actual runtime.
