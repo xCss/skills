@@ -14,13 +14,27 @@ metadata:
 
 This skill routes game localization work through a stable CLI instead of ad-hoc scripts. Use the skill for judgment, workflow selection, fallback policy, and review requirements; use the CLI for repeatable execution and JSON output.
 
+Three documents define this workflow: **SKILL.md** (this file) for workflow guidance and principles, `contracts.md` for JSON schemas and adapter interfaces, and `checklists.md` for human-review checklists.
+
 Translation quality rule: keep translations as short and accurate as possible without losing the original meaning, while still sounding natural in the target language.
 
-Localized text-image rule: model output is only the first draft. Before accepting it, post-process and visually verify alpha edges, white/gray fringes, source-language residue, canvas fit, and UI-state coverage. If a project does not ship an explicit mask for a text sprite, derive a temporary edit mask from the source image and any available text geometry before calling image edit.
+Localized text-image rule: model output is only the first draft. Before accepting it, post-process and visually verify alpha edges, white/gray fringes, source-language residue, canvas fit, and UI-state coverage. For H5 game text sprites, omit explicit `--mask` by default; pass `--text` + edit prompt and let the model handle text replacement. Use text-composite postprocess as a cleanup step if the model alters background.
 
 Runtime language rule: when browser auto-detection (`navigator.languages` / `navigator.language`) fails to match a shipped language, fall back to English (`en`) before the baseline/source language. If `en` is not shipped in the current worktree, keep the configured fallback chain/baseline.
 
 The current-worktree boundary is strict: audits describe files that exist now. Do not infer supported languages or localized assets from Git history, deleted files, old branches, or planned work unless the user explicitly asks for a history/regression audit.
+
+```mermaid
+flowchart LR
+    doctor["doctor"] --> probe["probe"]
+    probe --> extract["extract"]
+    probe --> runtime["runtime /防闪"]
+    extract --> audit["audit"]
+    audit --> generate["generate"]
+    generate --> jobs["jobs"]
+    jobs --> review["review"]
+    audit --> review
+```
 
 ## When to Use
 
@@ -83,6 +97,8 @@ The agent should call this CLI instead of writing temporary Node, Python, or she
 
 Migration rationale and the complete CLI boundary are recorded in [references/migration-assessment.md](references/migration-assessment.md). Provider and credential handling for image generation are documented in [references/provider-resolution.md](references/provider-resolution.md).
 
+Text-image generation, editing, and postprocessing are delegated to the sibling **imagegen-workflow** skill. See its SOP at `../memory/imagegen_workflow_sop.md` when routing image work.
+
 ## Command Routing
 
 | User intent | CLI command |
@@ -108,6 +124,7 @@ When using a model-backed image skill/provider for localized sprites:
 - Treat provider failure, malformed output, wrong background, white square backgrounds, clipped alpha, or wrong dimensions as retryable job failures.
 - Do not accept assets with visible white/gray fringe, source-language residue, ghost text, clipped strokes, or unexpected decoration. Clean edge pixels and alpha first; regenerate when cleanup would damage the artwork.
 - Build a side-by-side/contact-sheet review for source plus every target language before claiming image coverage.
+- **For H5 game i18n, `edit` defaults to no-mask (P1).** Omit `--mask` and pass `--text` + `--language` for text replacement. Only use explicit masks (P4) when the project adapter provides them. See Mask Source Priority in `../memory/imagegen_workflow_sop.md`.
 
 ## Output Contract
 
@@ -151,11 +168,36 @@ Never print API keys, tokens, cookies, passwords, full Authorization headers, or
 - Do not mix runtime fallback, locale key fallback, and text-image asset fallback into one summary; report them as separate layers.
 - Do not summarize image localization as a count only; list candidates from `candidateReport` or `i18n-asset-audit.json` that need human decision.
 - Do not treat model-generated images as final just because the file exists; inspect alpha, white/gray edges, residue, style drift, and actual runtime state.
-- Do not require project-side mask assets for text sprites; when explicit masks are absent, synthesize a temporary mask from source geometry or source-image heuristics and then call image edit.
+- Do not require project-side mask assets for text sprites; when explicit masks are absent, omit `--mask` and rely on `--text` + edit prompt. Synthesizing masks from geometry is a fallback (P4), not the default.
 - Do not leave source-language UI labels hidden under sprites or inside off/on toggle tracks; remove, hide, or map them deliberately and verify in the running UI.
 - Do not mix debug noise into stdout; the CLI must keep stdout machine-readable JSON.
 - Do not recreate deleted skill-level `tools/*.cjs` entry points; `scripts/i18n-workflow-cli.cjs` is the only supported execution surface.
 - Project-local paths such as `tools/i18n-workflow.config.cjs` and `tools/reports/` are user-project configuration/report locations, not skill implementation tools.
+
+### Language-Specific Pitfalls
+
+| Language | Specific pitfalls |
+|----------|------------------|
+| `vi` (Vietnamese) | Accented glyph compositing may cause inconsistent rendering across fonts; text length often exceeds source, causing overflow in constrained UI. |
+| `ko` (Korean) | Hangul syllable composition and spacing errors are common in machine translation; verify word-boundary segmentation and line-break behavior. |
+| `th` (Thai) | No spaces between words; rendering relies on implicit grapheme-cluster breaking. Test with long strings and small font sizes for visual overlap. |
+| `ar` / other RTL | Requires direction flipping, Arabic Presentation Forms shaping, mixed LTR/RTL fragment handling, and mirrored UI state checks beyond locale-switching. |
+
+## Failure Recovery by Stage
+
+| Stage | Typical failure | Recovery step |
+|------|----------------|---------------|
+| `doctor` | Config not found | Check `tools/i18n-workflow.config.cjs` location and `--config` path accuracy |
+| `probe` | Provider env missing | Inspect `data.hasApiEnvironment`; if image gen needed, configure `IMAGEGEN_*` or run imagegen `doctor` |
+| `extract` | Wrong/missing keys in report | Adjust `sourceTextToKey` or `getRuntimeTextKeyMap` config; re-run `--dry-run` to verify coverage |
+| `audit` | textImageCandidatesWithoutI18nMap too many | Inspect `candidateReport`; classify manually or enable classification provider |
+| `generate` | Provider 502/503 / empty response | Keep same config + mask (if any) and retry (transient); if style drift or wrong language → adjust prompt |
+| `generate` | Image has white fringe / residue | Run imagegen `postprocess`; if cleanup damages artwork → regenerate with stronger `--prompt` |
+| `jobs` | Missing translation entries | Check `supportedLanguages`, confirm locale files actually exist in worktree |
+| `review` | Runtime key coverage gaps | Bind `getRuntimeTextKeyMap` or review `runtimeKeyCoverage.missing` |
+| `runtime` | Locale init not done before first UI | Add loading scene or defer scene init until `i18next` / locale provider is ready |
+
+For image-specific failures, see `../memory/imagegen_workflow_sop.md` retry guidance.
 
 ## Verification Checklist
 

@@ -56,7 +56,7 @@ module.exports = {
   // --- Text-Image Source ---
   // Returns an array of { imagePath, width, height, spriteFrameUuid, resourcesPath }
   // Each candidate may optionally carry `mask` or `textComposite` metadata.
-  // When absent, i18n-workflow may synthesize a temporary edit mask from source geometry or source-image heuristics.
+  // H5 text-sprite edits omit masks by default; use candidate masks only when provided by the project adapter.
   enumerateSourceTextImages: () => [],
 
   // --- Localized Image Target ---

@@ -242,7 +242,65 @@ test('generate execute without source sends text-only Responses request', async 
     const content = requestBody.input[0].content;
     assert.strictEqual(content.some(item => item.type === 'input_text'), true);
     assert.strictEqual(content.some(item => item.type === 'input_image'), false);
+    assert.deepStrictEqual(requestBody.tools, [{
+      type: 'image_generation',
+      action: 'generate',
+      model: 'gpt-image-2',
+      output_format: 'png',
+    }]);
+    assert.deepStrictEqual(requestBody.tool_choice, { type: 'image_generation' });
     assert.doesNotMatch(result.stdout, /TEST_ONLY_IMAGEGEN_GENERATE_KEY/);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('generate can post to the legacy /v1/images/generations endpoint for text-only prompts', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'imagegen-workflow-legacy-images-generate-'));
+  const out = path.join(tempRoot, 'out.png');
+  let requestUrl = null;
+  let requestHeaders = null;
+  const server = http.createServer((req, res) => {
+    requestUrl = req.url;
+    requestHeaders = req.headers;
+    if (req.url === '/v1/images/generations') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        assert.match(requestHeaders['content-type'] || '', /application\/x-www-form-urlencoded/);
+        assert.match(body, /fresh-blue-icon/);
+        assert.match(body, /size=1x1/);
+        assert.match(body, /response_format=b64_json/);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          data: [{ b64_json: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=' }],
+        }));
+      });
+      return;
+    }
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end('{}');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const result = await runCliAsync([
+      'generate',
+      '--text', 'fresh-blue-icon',
+      '--language', 'en',
+      '--width', '1',
+      '--height', '1',
+      '--out', out,
+      '--base-url', `http://127.0.0.1:${server.address().port}/v1/images/generations`,
+      '--api-key', 'TEST_ONLY_LEGACY_IMAGES_GENERATE_KEY',
+    ]);
+    assert.strictEqual(result.status, 0, result.stderr);
+    const payload = parseJson(result.stdout);
+    assert.strictEqual(payload.ok, true);
+    assert.strictEqual(payload.command, 'generate');
+    assert.strictEqual(requestUrl, '/v1/images/generations');
+    assert.strictEqual(fs.existsSync(out), true);
+    assert.doesNotMatch(result.stdout, /TEST_ONLY_LEGACY_IMAGES_GENERATE_KEY/);
   } finally {
     await new Promise(resolve => server.close(resolve));
     fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -273,7 +331,7 @@ test('generate still requires source when preserving source alpha', () => {
   }
 });
 
-test('edit dry-run returns Images Edit plan and does not create output', () => {
+test('edit dry-run returns Responses image_generation edit plan and does not create output', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'imagegen-workflow-edit-'));
   try {
     const source = path.join(tempRoot, 'source.png');
@@ -300,9 +358,11 @@ test('edit dry-run returns Images Edit plan and does not create output', () => {
     assert.strictEqual(payload.ok, true);
     assert.strictEqual(payload.command, 'edit');
     assert.strictEqual(payload.data.model, 'gpt-image-2');
-    assert.strictEqual(payload.data.plan.endpoint, '/v1/images/edits');
-    assert.strictEqual(payload.data.plan.transport, 'responses-compatible');
+    assert.strictEqual(payload.data.plan.endpoint, '/responses');
+    assert.strictEqual(payload.data.plan.transport, 'responses-image-generation-tool');
     assert.strictEqual(payload.data.plan.mask, mask);
+    assert.strictEqual(payload.data.plan.tool.type, 'image_generation');
+    assert.strictEqual(payload.data.plan.tool.action, 'edit');
     assert.strictEqual(payload.data.plan.editParameters.quality, 'medium');
     assert.strictEqual(payload.data.plan.editParameters.outputCompression, 0);
     assert.match(payload.data.prompt, /Use this exact replacement text: Start/);
@@ -482,8 +542,10 @@ test('batch can dry-run edit jobs and write a report', () => {
     assert.strictEqual(payload.data.summary.ok, 1);
     assert.strictEqual(payload.data.items[0].command, 'edit');
     assert.strictEqual(payload.data.items[0].dryRun, true);
-    assert.strictEqual(payload.data.items[0].plan.endpoint, '/v1/images/edits');
-    assert.strictEqual(payload.data.items[0].plan.transport, 'responses-compatible');
+    assert.strictEqual(payload.data.items[0].plan.endpoint, '/responses');
+    assert.strictEqual(payload.data.items[0].plan.transport, 'responses-image-generation-tool');
+    assert.strictEqual(payload.data.items[0].plan.tool.type, 'image_generation');
+    assert.strictEqual(payload.data.items[0].plan.tool.action, 'edit');
     assert.strictEqual(fs.existsSync(out), false);
     assert.strictEqual(fs.existsSync(report), true);
   } finally {
@@ -515,5 +577,134 @@ test('probe network reports whether the requested model is visible', async () =>
     assert.doesNotMatch(result.stdout, /TEST_ONLY_NETWORK_KEY/);
   } finally {
     await new Promise(resolve => server.close(resolve));
+  }
+});
+
+test('edit execute sends Responses image_generation edit tool with mask', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'imagegen-workflow-edit-execute-'));
+  const source = path.join(tempRoot, 'source.png');
+  const mask = path.join(tempRoot, 'mask.png');
+  const out = path.join(tempRoot, 'out.png');
+  writePng(source, 1, 1);
+  writePng(mask, 1, 1);
+  let requestBody = null;
+  const server = http.createServer((req, res) => {
+    if (req.url === '/v1/responses') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        requestBody = JSON.parse(body);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          output: [{
+            type: 'image_generation_call',
+            result: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',
+          }],
+        }));
+      });
+      return;
+    }
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end('{}');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const result = await runCliAsync([
+      'edit',
+      '--source', source,
+      '--mask', mask,
+      '--text', 'Start',
+      '--language', 'en',
+      '--width', '1',
+      '--height', '1',
+      '--out', out,
+      '--quality', 'medium',
+      '--output-format', 'png',
+      '--base-url', `http://127.0.0.1:${server.address().port}/v1`,
+      '--api-key', 'TEST_ONLY_IMAGEGEN_EDIT_KEY',
+    ]);
+    assert.strictEqual(result.status, 0, result.stderr);
+    const payload = parseJson(result.stdout);
+    assert.strictEqual(payload.ok, true);
+    assert.strictEqual(payload.command, 'edit');
+    assert.strictEqual(fs.existsSync(out), true);
+    const content = requestBody.input[0].content;
+    assert.strictEqual(content.some(item => item.type === 'input_text'), true);
+    assert.strictEqual(content.some(item => item.type === 'input_image' && item.image_url.startsWith('data:image/png;base64,')), true);
+    assert.deepStrictEqual(requestBody.tools, [{
+      type: 'image_generation',
+      action: 'edit',
+      model: 'gpt-image-2',
+      quality: 'medium',
+      output_format: 'png',
+      input_image_mask: {
+        image_url: requestBody.tools[0].input_image_mask.image_url,
+      },
+    }]);
+    assert.match(requestBody.tools[0].input_image_mask.image_url, /^data:image\/png;base64,/);
+    assert.deepStrictEqual(requestBody.tool_choice, { type: 'image_generation' });
+    assert.doesNotMatch(result.stdout, /TEST_ONLY_IMAGEGEN_EDIT_KEY/);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('edit can post to the legacy /v1/images/edits endpoint when the base URL targets images', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'imagegen-workflow-legacy-images-edit-'));
+  const source = path.join(tempRoot, 'source.png');
+  const mask = path.join(tempRoot, 'mask.png');
+  const out = path.join(tempRoot, 'out.png');
+  writePng(source, 1, 1);
+  writePng(mask, 1, 1);
+  let requestUrl = null;
+  let requestHeaders = null;
+  const server = http.createServer((req, res) => {
+    requestUrl = req.url;
+    requestHeaders = req.headers;
+    if (req.url === '/v1/images/edits') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        assert.match(requestHeaders['content-type'] || '', /multipart\/form-data/);
+        assert.match(body, /name="prompt"/);
+        assert.match(body, /name="image"/);
+        assert.match(body, /name="mask"/);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          data: [{ b64_json: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=' }],
+        }));
+      });
+      return;
+    }
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end('{}');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const result = await runCliAsync([
+      'edit',
+      '--source', source,
+      '--mask', mask,
+      '--text', 'Start',
+      '--language', 'en',
+      '--width', '1',
+      '--height', '1',
+      '--out', out,
+      '--quality', 'medium',
+      '--output-format', 'png',
+      '--base-url', `http://127.0.0.1:${server.address().port}/v1/images/edits`,
+      '--api-key', 'TEST_ONLY_LEGACY_IMAGES_EDIT_KEY',
+    ]);
+    assert.strictEqual(result.status, 0, result.stderr);
+    const payload = parseJson(result.stdout);
+    assert.strictEqual(payload.ok, true);
+    assert.strictEqual(payload.command, 'edit');
+    assert.strictEqual(requestUrl, '/v1/images/edits');
+    assert.strictEqual(fs.existsSync(out), true);
+    assert.doesNotMatch(result.stdout, /TEST_ONLY_LEGACY_IMAGES_EDIT_KEY/);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    fs.rmSync(tempRoot, { recursive: true, force: true });
   }
 });

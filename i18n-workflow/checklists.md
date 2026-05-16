@@ -43,7 +43,7 @@ Reusable human-review checklists. Not project-specific.
 - [ ] No white square background was introduced for transparent sprites.
 - [ ] No white/gray fringe or low-saturation halo remains around text, strokes, signs, or icons.
 - [ ] Generated text is not visibly too small, off-center, or stylistically inconsistent with the source.
-- [ ] If no project mask exists, the workflow synthesizes a temporary edit mask from source geometry or source-image heuristics before image edit runs.
+- [ ] For H5 text sprites, the default edit path omits `--mask` and passes the exact target `--text`/language; use a project-provided mask only when the adapter supplies one.
 
 ## Model Generation Retry Checklist
 

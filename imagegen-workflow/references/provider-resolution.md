@@ -12,7 +12,7 @@ The CLI resolves provider settings in this order:
 4. Codex provider/base_url files, which are commonly written by cc-switch: `$CODEX_HOME/config.toml` plus `$CODEX_HOME/auth.json`, or `~/.codex/config.toml` plus `~/.codex/auth.json` when `CODEX_HOME` is not set. The CLI reads the active `model_provider`, then `[model_providers.<name>].base_url`, and reads `OPENAI_API_KEY` from `auth.json`.
 5. Model fallback: `gpt-image-2`.
 
-`--base-url` may be either a root API URL or a `/responses` endpoint. The CLI appends `/responses` when needed for generation and resolves the sibling `/v1/images/edits` endpoint for `edit`. `probe --network` checks the sibling `/models` endpoint and reports `modelVisible` when it can parse model IDs from `data[].id`.
+`--base-url` may be either a root API URL or a `/responses` endpoint. The CLI appends `/responses` when needed for `generate` and `edit`; both commands send the official Responses `image_generation` tool, with `action: "generate"` or `action: "edit"`. `probe --network` checks the sibling `/models` endpoint and reports `modelVisible` when it can parse model IDs from `data[].id`.
 
 Some codex/cc-switch backends expose text models reliably but only intermittent image support. If the same `/responses` image request flips between `200`, `502`, `503`, or empty-image-result payloads, treat the backend as image-capable-but-flaky and retry serially before changing prompts or source assets.
 

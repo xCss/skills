@@ -140,6 +140,31 @@ def images_edit_endpoint(base_url: str) -> str:
     return f"{base}/v1/images/edits"
 
 
+def images_generation_endpoint(base_url: str) -> str:
+    base = base_url.rstrip("/")
+    if base.endswith("/images/generations"):
+        return base
+    if base.endswith("/images"):
+        return f"{base}/generations"
+    if base.endswith("/responses"):
+        base = base.removesuffix("/responses")
+    if base.endswith("/v1"):
+        return f"{base}/images/generations"
+    return f"{base}/v1/images/generations"
+
+
+def use_legacy_images_edit_api(base_url: str) -> bool:
+    base = base_url.rstrip("/")
+    return base.endswith("/images/edits") or base.endswith("/images")
+
+
+def use_legacy_images_generation_api(base_url: str, source: Path | None) -> bool:
+    if source is not None:
+        return False
+    base = base_url.rstrip("/")
+    return base.endswith("/images/generations") or base.endswith("/images")
+
+
 def command_available(command: str) -> bool:
     return shutil.which(command) is not None
 
@@ -259,6 +284,8 @@ def response_payload(text: str) -> dict[str, Any]:
 def decode_response_body(response: Any) -> str:
     raw = response.content
     encoding = str(response.headers.get("Content-Encoding") or "").lower()
+    if raw.lstrip()[:1] in (b"{", b"["):
+        return raw.decode(response.encoding or "utf-8", errors="replace")
     if encoding == "zstd" or raw.startswith(b"\x28\xb5\x2f\xfd"):
         try:
             import zstandard as zstd
@@ -361,7 +388,37 @@ def build_edit_prompt(args: argparse.Namespace) -> str:
     )
 
 
-def call_responses(provider: dict[str, str], source: Path | None, prompt: str, mask: Path | None = None) -> dict[str, Any]:
+def supported_tool_size(args: argparse.Namespace) -> str | None:
+    size = f"{args.width}x{args.height}"
+    return size if size in {"1024x1024", "1024x1536", "1536x1024"} else None
+
+
+def image_generation_tool(provider: dict[str, str], args: argparse.Namespace, action: str, mask: Path | None = None, include_mask_data: bool = True) -> dict[str, Any]:
+    tool: dict[str, Any] = {
+        "type": "image_generation",
+        "action": action,
+        "model": provider["model"],
+        "output_format": resolve_output_format(args),
+    }
+    size = supported_tool_size(args)
+    if size:
+        tool["size"] = size
+    for arg_name, field_name in [
+        ("background", "background"),
+        ("quality", "quality"),
+        ("output_compression", "output_compression"),
+        ("input_fidelity", "input_fidelity"),
+        ("moderation", "moderation"),
+    ]:
+        value = getattr(args, arg_name, None)
+        if value is not None:
+            tool[field_name] = value
+    if mask is not None:
+        tool["input_image_mask"] = {"image_url": image_data_url(mask) if include_mask_data else "[MASK_DATA_URL_REDACTED]"}
+    return tool
+
+
+def call_responses(provider: dict[str, str], source: Path | None, prompt: str, args: argparse.Namespace, action: str, mask: Path | None = None) -> dict[str, Any]:
     import requests
 
     content: list[dict[str, str]] = [
@@ -369,9 +426,7 @@ def call_responses(provider: dict[str, str], source: Path | None, prompt: str, m
     ]
     if source is not None:
         content.append({"type": "input_image", "image_url": image_data_url(source)})
-    if mask is not None:
-        content.append({"type": "input_text", "text": "The next image is an edit mask. Only the white/visible mask area may change; all unmasked regions must remain unchanged."})
-        content.append({"type": "input_image", "image_url": image_data_url(mask)})
+    tool = image_generation_tool(provider, args, action, mask)
 
     body = {
         "model": provider["model"],
@@ -381,6 +436,8 @@ def call_responses(provider: dict[str, str], source: Path | None, prompt: str, m
                 "content": content,
             }
         ],
+        "tools": [tool],
+        "tool_choice": {"type": "image_generation"},
     }
     response = requests.post(
         responses_endpoint(provider["base_url"]),
@@ -391,6 +448,76 @@ def call_responses(provider: dict[str, str], source: Path | None, prompt: str, m
     if not response.ok:
         raise RuntimeError(f"Responses API failed {response.status_code}: {redact(decode_response_body(response)[:1000])}")
     return response_payload(decode_response_body(response))
+
+
+def call_images_edit(provider: dict[str, str], source: Path, prompt: str, args: argparse.Namespace, mask: Path | None = None) -> dict[str, Any]:
+    import requests
+
+    files: dict[str, tuple[str, bytes, str]] = {
+        "image": (source.name, source.read_bytes(), mime_for(source)),
+    }
+    if mask is not None:
+        files["mask"] = (mask.name, mask.read_bytes(), mime_for(mask))
+
+    data: dict[str, str] = {
+        "prompt": prompt,
+        "model": provider["model"],
+        "size": f"{args.width}x{args.height}",
+        "response_format": "b64_json",
+    }
+    for arg_name, field_name in [
+        ("background", "background"),
+        ("quality", "quality"),
+        ("output_compression", "output_compression"),
+        ("input_fidelity", "input_fidelity"),
+        ("moderation", "moderation"),
+    ]:
+        value = getattr(args, arg_name, None)
+        if value is not None:
+            data[field_name] = str(value)
+
+    response = requests.post(
+        images_edit_endpoint(provider["base_url"]),
+        headers={"Authorization": f"Bearer {provider['api_key']}"},
+        data=data,
+        files=files,
+        timeout=180,
+    )
+    if not response.ok:
+        raise RuntimeError(f"Images edit API failed {response.status_code}: {redact(decode_response_body(response)[:1000])}")
+    return response.json()
+
+
+def call_images_generate(provider: dict[str, str], prompt: str, args: argparse.Namespace) -> dict[str, Any]:
+    import requests
+
+    data: dict[str, str] = {
+        "prompt": prompt,
+        "model": provider["model"],
+        "size": f"{args.width}x{args.height}",
+        "response_format": "b64_json",
+    }
+    for arg_name, field_name in [
+        ("background", "background"),
+        ("quality", "quality"),
+        ("output_compression", "output_compression"),
+        ("moderation", "moderation"),
+        ("user", "user"),
+        ("n", "n"),
+    ]:
+        value = getattr(args, arg_name, None)
+        if value is not None:
+            data[field_name] = str(value)
+
+    response = requests.post(
+        images_generation_endpoint(provider["base_url"]),
+        headers={"Authorization": f"Bearer {provider['api_key']}"},
+        data=data,
+        timeout=180,
+    )
+    if not response.ok:
+        raise RuntimeError(f"Images generation API failed {response.status_code}: {redact(decode_response_body(response)[:1000])}")
+    return response.json()
 
 
 def image_dimensions(path: Path) -> dict[str, int]:
@@ -604,6 +731,7 @@ def encode_image(raw: bytes, args: argparse.Namespace) -> tuple[bytes, str]:
 
 
 def generation_plan(args: argparse.Namespace, provider: dict[str, str], source: Path | None, out: Path) -> dict[str, Any]:
+    legacy_images = use_legacy_images_generation_api(provider["base_url"], source)
     return {
         "source": str(source) if source is not None else None,
         "output": str(out),
@@ -613,6 +741,9 @@ def generation_plan(args: argparse.Namespace, provider: dict[str, str], source: 
         "height": args.height,
         "mode": "reference" if source is not None else "text-only",
         "prompt": build_prompt(args, source),
+        "endpoint": "/v1/images/generations" if legacy_images else "/responses",
+        "transport": "images-api" if legacy_images else "responses-image-generation-tool",
+        "tool": None if legacy_images else image_generation_tool(provider, args, "generate"),
         "postprocess": {
             "textCompositeSpec": str(Path(args.text_composite_spec).resolve()) if args.text_composite_spec else None,
             "preserveSourceAlpha": bool(args.preserve_source_alpha),
@@ -625,6 +756,8 @@ def generation_plan(args: argparse.Namespace, provider: dict[str, str], source: 
 
 
 def edit_plan(args: argparse.Namespace, provider: dict[str, str], source: Path, out: Path) -> dict[str, Any]:
+    endpoint = "/v1/images/edits" if use_legacy_images_edit_api(provider["base_url"]) else "/responses"
+    transport = "images-api" if endpoint == "/v1/images/edits" else "responses-image-generation-tool"
     return {
         "source": str(source),
         "mask": str(Path(args.mask).resolve()) if getattr(args, "mask", None) else None,
@@ -633,8 +766,9 @@ def edit_plan(args: argparse.Namespace, provider: dict[str, str], source: Path, 
         "text": getattr(args, "text", None),
         "width": args.width,
         "height": args.height,
-        "endpoint": "/v1/images/edits",
-        "transport": "responses-compatible",
+        "endpoint": endpoint,
+        "transport": transport,
+        "tool": image_generation_tool(provider, args, "edit", Path(args.mask).resolve() if getattr(args, "mask", None) else None, include_mask_data=False),
         "editParameters": {
             "background": getattr(args, "background", None),
             "quality": getattr(args, "quality", None),
@@ -678,7 +812,10 @@ def cmd_generate(args: argparse.Namespace) -> int:
     if not provider["base_url"] or not provider["api_key"]:
         return fail("generate", "NO_PROVIDER_CONFIGURED", "Provider configuration is incomplete", "Set CLI args, IMAGEGEN_BASE_URL/IMAGEGEN_API_KEY, BASE_URL/API_KEY, or Codex config/auth.", status=2)
     try:
-        response = call_responses(provider, source, build_prompt(args, source))
+        if use_legacy_images_generation_api(provider["base_url"], source):
+            response = call_images_generate(provider, build_prompt(args, source), args)
+        else:
+            response = call_responses(provider, source, build_prompt(args, source), args, "generate")
         image_b64 = extract_image_base64(response)
         if not image_b64:
             raise RuntimeError("No generated image base64 found in model response.")
@@ -727,7 +864,10 @@ def cmd_edit(args: argparse.Namespace) -> int:
         return fail("edit", "NO_PROVIDER_CONFIGURED", "Provider configuration is incomplete", "Set CLI args, IMAGEGEN_BASE_URL/IMAGEGEN_API_KEY, BASE_URL/API_KEY, or Codex config/auth.", status=2)
     try:
         mask = Path(args.mask).resolve() if args.mask else None
-        response = call_responses(provider, source, build_edit_prompt(args), mask)
+        if use_legacy_images_edit_api(provider["base_url"]):
+            response = call_images_edit(provider, source, build_edit_prompt(args), args, mask)
+        else:
+            response = call_responses(provider, source, build_edit_prompt(args), args, "edit", mask)
         image_b64 = extract_image_base64(response)
         if not image_b64:
             raise RuntimeError("No edited image base64 found in model response.")
@@ -841,7 +981,10 @@ def run_batch_item(job: dict[str, Any], defaults: argparse.Namespace) -> dict[st
                 }
             if not provider["base_url"] or not provider["api_key"]:
                 raise RuntimeError("Provider environment is incomplete")
-            response = call_responses(provider, source, build_prompt(args, source))
+            if use_legacy_images_generation_api(provider["base_url"], source):
+                response = call_images_generate(provider, build_prompt(args, source), args)
+            else:
+                response = call_responses(provider, source, build_prompt(args, source), args, "generate")
             image_b64 = extract_image_base64(response)
             if not image_b64:
                 raise RuntimeError("No generated image base64 found in model response.")
@@ -873,7 +1016,10 @@ def run_batch_item(job: dict[str, Any], defaults: argparse.Namespace) -> dict[st
             if not provider["base_url"] or not provider["api_key"]:
                 raise RuntimeError("Provider environment is incomplete")
             mask = Path(args.mask).resolve() if args.mask else None
-            response = call_responses(provider, source, build_edit_prompt(args), mask)
+            if use_legacy_images_edit_api(provider["base_url"]):
+                response = call_images_edit(provider, source, build_edit_prompt(args), args, mask)
+            else:
+                response = call_responses(provider, source, build_edit_prompt(args), args, "edit", mask)
             image_b64 = extract_image_base64(response)
             if not image_b64:
                 raise RuntimeError("No edited image base64 found in model response.")

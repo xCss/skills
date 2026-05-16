@@ -1,0 +1,10 @@
+{
+  "name": "i18n-workflow",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "CLI workflow for game i18n text extraction, localized asset audit, and language launch orchestration.",
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

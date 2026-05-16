@@ -1,7 +1,7 @@
 [project]
 name = "imagegen-workflow"
 version = "0.1.0"
-description = "Stable CLI for reference-image generation and postprocessing workflows"
+description = "Stable CLI for image generation, edit-based text replacement, PNG postprocessing, and batch-driven image workflows"
 requires-python = ">=3.11"
 dependencies = [
   "pillow>=10.0.0",

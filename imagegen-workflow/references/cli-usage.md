@@ -9,8 +9,8 @@ uv run python scripts/imagegen_workflow_cli.py --help
 uv run python scripts/imagegen_workflow_cli.py doctor
 uv run python scripts/imagegen_workflow_cli.py probe
 uv run python scripts/imagegen_workflow_cli.py probe --network --model gpt-image-2
-uv run python scripts/imagegen_workflow_cli.py edit --source source.png --mask mask.png --prompt "Erase the old text and render Start in the same style; keep everything else unchanged" --width 240 --height 80 --out out.png --quality medium --output-format png --dry-run
 uv run python scripts/imagegen_workflow_cli.py edit --source source.png --text "Start" --language en --width 240 --height 80 --out out.png
+uv run python scripts/imagegen_workflow_cli.py edit --source source.png --mask mask.png --prompt "Erase the old text and render Start in the same style; keep everything else unchanged" --width 240 --height 80 --out out.png --quality medium --output-format png --dry-run
 uv run python scripts/imagegen_workflow_cli.py generate --text "fresh-blue-icon" --language en --width 240 --height 80 --out out.png --dry-run
 uv run python scripts/imagegen_workflow_cli.py generate --source reference.png --text "Start" --language en --width 240 --height 80 --out out.png
 uv run python scripts/imagegen_workflow_cli.py generate --text "" --language en --width 768 --height 480 --extra-prompt "isometric cartoon scene" --out cover.webp
@@ -42,7 +42,7 @@ Success:
 }
 ```
 
-Edit success uses the same JSON shape with `"command": "edit"`, `provider: "responses-compatible"`, and a `data.plan.endpoint` of `/v1/images/edits`. The endpoint field records the official edit semantics; the transport may be Responses-compatible when the configured provider does not expose the Images Edit endpoint directly.
+Edit success uses the same JSON shape with `"command": "edit"`, `provider: "responses-compatible"`, and a `data.plan.endpoint` of `/responses`. The plan includes a `tool` object with `type: "image_generation"` and `action: "edit"`. If `--mask` is supplied, it is sent through the tool's `input_image_mask`; otherwise the edit is maskless.
 
 Failure:
 
@@ -60,13 +60,13 @@ Failure:
 
 ## Cross-Skill Use
 
-Other skills should call this CLI for source-image edits, generation, and postprocessing instead of reimplementing provider calls or Pillow transforms. Prefer `edit` over `generate` when a current image should be modified. For `generate`, omit `--source` for text-only/fresh image generation and pass `--source` only when the model should use a reference image. Pass project-specific visual requirements through `--prompt`, `--extra-prompt`, `--guidance-file`, `--mask`, `--background`, `--quality`, `--output-format`, `--output-compression`, `--input-fidelity`, `--text-composite-spec`, `--preserve-source-alpha`, and `--transparent-edge-background`.
+Other skills should call this CLI for source-image edits, generation, and postprocessing instead of reimplementing provider calls or Pillow transforms. The i18n-workflow skill delegates localized text-image generation, editing, and postprocessing to this CLI; see `../SKILL.md` and `../../i18n-workflow/SKILL.md` for the cross-skill routing flow. Prefer `edit` over `generate` when a current image should be modified. For H5 text-sprite edits, omit `--mask` by default and pass `--text` plus `--language`; use `--mask` only when the project adapter supplies one or a targeted retry requires it. For `generate`, omit `--source` for text-only/fresh image generation and pass `--source` only when the model should use a reference image. Pass project-specific visual requirements through `--prompt`, `--extra-prompt`, `--guidance-file`, `--mask`, `--background`, `--quality`, `--output-format`, `--output-compression`, `--input-fidelity`, `--text-composite-spec`, `--preserve-source-alpha`, and `--transparent-edge-background`.
 
-`edit` maps to the official Images Edit style of request. Use `--mask` for regional changes; mask files must be compatible PNGs with an alpha channel and the same dimensions as the edited image. If the provider lacks `/v1/images/edits`, the CLI keeps edit semantics by sending the source image and mask through the Responses-compatible path. Do not promise pixel-perfect mask adherence: model masks are guidance and still need visual review. For `gpt-image-2`, avoid `--background transparent`; use `opaque` or `auto`, then postprocess if the final asset needs transparency.
+`edit` maps to the official Responses image-generation-tool edit request. By default, omit `--mask` and pass only `--source` + `--text` / `--prompt`; the model handles text-region replacement without a mask. Use `--mask` for regional changes only when an explicit mask file is available. Mask files must be compatible PNGs with an alpha channel and the same dimensions as the edited image. Do not promise pixel-perfect mask adherence: model masks are guidance and still need visual review. For `gpt-image-2`, avoid `--background transparent`; use `opaque` or `auto`, then postprocess if the final asset needs transparency.
 
-The Responses image path may be intermittent on some providers: a successful run can be followed by transient `502` or `503` errors on the exact same payload. When that happens, retry serially with the same source, mask, and prompt before rewriting the job.
+The Responses image path may be intermittent on some providers: a successful run can be followed by transient `502` or `503` errors on the exact same payload. When that happens, retry serially with the same source, mask setting, and prompt before rewriting the job.
 
-For localized text-image edits, always pass `--text` with the exact target string even when `--prompt` is present. The prompt should say: change only the masked/title area, keep everything else unchanged, and do not add rectangular patches, debris, extra punctuation, or new outlines.
+For localized text-image edits, always pass `--text` with the exact target string even when `--prompt` is present. For maskless H5 edits, the prompt should say: replace only the source text with the target text, keep the canvas/background/non-text artwork unchanged, and do not add rectangular patches, debris, extra punctuation, or new outlines. If a project mask is supplied, constrain the same instruction to the masked/title area.
 
 Avoid local text drawing as a substitute for model edit. Local operations are acceptable for postprocessing (canvas normalization, alpha restoration, edge-connected black matte cleanup, compression), but typography changes should stay in the model edit path unless the user explicitly requests a local fallback.
 
@@ -114,7 +114,31 @@ Fresh-image batch jobs can omit `source`:
 }
 ```
 
-Existing-image modification batch jobs should use `command: "edit"`:
+Existing-image modification batch jobs should use `command: "edit"`.
+
+For H5 game i18n (default, no-mask) omit `mask`:
+
+```json
+{
+  "jobs": [
+    {
+      "id": "button-zh-en",
+      "command": "edit",
+      "source": "/tmp/source.png",
+      "text": "Start",
+      "language": "en",
+      "width": 240,
+      "height": 80,
+      "out": "/tmp/out.png",
+      "quality": "medium",
+      "output_format": "png",
+      "dry_run": true
+    }
+  ]
+}
+```
+
+Explicit mask (P4, rare):
 
 ```json
 {
