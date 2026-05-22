@@ -1033,3 +1033,146 @@ test('edit normalizes L-mode mask to OpenAI alpha polarity (white=edit -> alpha=
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
 });
+
+test('edit drops input_fidelity from Responses tool when model is gpt-image-2', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'imagegen-workflow-fidelity-responses-'));
+  const source = path.join(tempRoot, 'source.png');
+  const out = path.join(tempRoot, 'out.png');
+  writePng(source, 1, 1);
+  let requestBody = null;
+  const server = http.createServer((req, res) => {
+    if (req.url === '/v1/responses') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        requestBody = JSON.parse(body);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          output: [{ type: 'image_generation_call', result: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=' }],
+        }));
+      });
+      return;
+    }
+    res.writeHead(404).end('{}');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const result = await runCliAsync([
+      'edit',
+      '--source', source,
+      '--text', 'Start',
+      '--language', 'en',
+      '--width', '1',
+      '--height', '1',
+      '--out', out,
+      '--input-fidelity', 'high',
+      '--model', 'gpt-image-2',
+      '--base-url', `http://127.0.0.1:${server.address().port}/v1`,
+      '--api-key', 'TEST_ONLY_FIDELITY_RESPONSES_KEY',
+    ]);
+    assert.strictEqual(result.status, 0, result.stderr);
+    const payload = parseJson(result.stdout);
+    assert.strictEqual(payload.ok, true);
+    assert.strictEqual(Object.hasOwn(requestBody.tools[0], 'input_fidelity'), false);
+    assert.strictEqual(payload.warnings.length, 1);
+    assert.match(payload.warnings[0], /input_fidelity is not supported by gpt-image-2/);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('edit drops input_fidelity from legacy /v1/images/edits multipart when model is gpt-image-2', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'imagegen-workflow-fidelity-legacy-'));
+  const source = path.join(tempRoot, 'source.png');
+  const out = path.join(tempRoot, 'out.png');
+  writePng(source, 1, 1);
+  let requestBody = '';
+  const server = http.createServer((req, res) => {
+    if (req.url === '/v1/images/edits') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        requestBody = body;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          data: [{ b64_json: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=' }],
+        }));
+      });
+      return;
+    }
+    res.writeHead(404).end('{}');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const result = await runCliAsync([
+      'edit',
+      '--source', source,
+      '--text', 'Start',
+      '--language', 'en',
+      '--width', '1',
+      '--height', '1',
+      '--out', out,
+      '--input-fidelity', 'high',
+      '--model', 'gpt-image-2',
+      '--base-url', `http://127.0.0.1:${server.address().port}/v1/images/edits`,
+      '--api-key', 'TEST_ONLY_FIDELITY_LEGACY_KEY',
+    ]);
+    assert.strictEqual(result.status, 0, result.stderr);
+    const payload = parseJson(result.stdout);
+    assert.strictEqual(payload.ok, true);
+    assert.doesNotMatch(requestBody, /name="input_fidelity"/);
+    assert.strictEqual(payload.warnings.length, 1);
+    assert.match(payload.warnings[0], /input_fidelity is not supported by gpt-image-2/);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('edit preserves input_fidelity when model is gpt-image-1', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'imagegen-workflow-fidelity-supported-'));
+  const source = path.join(tempRoot, 'source.png');
+  const out = path.join(tempRoot, 'out.png');
+  writePng(source, 1, 1);
+  let requestBody = null;
+  const server = http.createServer((req, res) => {
+    if (req.url === '/v1/responses') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        requestBody = JSON.parse(body);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          output: [{ type: 'image_generation_call', result: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=' }],
+        }));
+      });
+      return;
+    }
+    res.writeHead(404).end('{}');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const result = await runCliAsync([
+      'edit',
+      '--source', source,
+      '--text', 'Start',
+      '--language', 'en',
+      '--width', '1',
+      '--height', '1',
+      '--out', out,
+      '--input-fidelity', 'high',
+      '--model', 'gpt-image-1',
+      '--base-url', `http://127.0.0.1:${server.address().port}/v1`,
+      '--api-key', 'TEST_ONLY_FIDELITY_KEEP_KEY',
+    ]);
+    assert.strictEqual(result.status, 0, result.stderr);
+    const payload = parseJson(result.stdout);
+    assert.strictEqual(payload.ok, true);
+    assert.strictEqual(requestBody.tools[0].input_fidelity, 'high');
+    assert.deepStrictEqual(payload.warnings, []);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});

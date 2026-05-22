@@ -300,6 +300,27 @@ def model_disallows_transparent_background(provider: dict[str, str]) -> bool:
     return provider.get("model", "").startswith("gpt-image-2")
 
 
+def model_supports_input_fidelity(provider: dict[str, str]) -> bool:
+    model = (provider.get("model") or "").lower()
+    if model.startswith("gpt-image-1-mini"):
+        return False
+    if model.startswith("gpt-image-2"):
+        return False
+    return True
+
+
+def gate_input_fidelity(args: argparse.Namespace, provider: dict[str, str], warnings: list[str]) -> None:
+    value = getattr(args, "input_fidelity", None)
+    if value is None:
+        return
+    if model_supports_input_fidelity(provider):
+        return
+    warnings.append(
+        f"input_fidelity is not supported by {provider.get('model')}; dropping it from the request"
+    )
+    args.input_fidelity = None
+
+
 def provider_background(args: argparse.Namespace, provider: dict[str, str]) -> str | None:
     value = getattr(args, "background", None)
     if value == "transparent" and model_disallows_transparent_background(provider):
@@ -861,9 +882,10 @@ def cmd_generate(args: argparse.Namespace) -> int:
     if error_code:
         return fail("generate", error_code, error_message or "Invalid source configuration", "Pass --source with a readable local image path.", error_detail, 2)
     provider = provider_config(args)
+    warnings: list[str] = []
+    gate_input_fidelity(args, provider, warnings)
     plan = generation_plan(args, provider, source, out)
     output_mime = mime_for_format(resolve_output_format(args))
-    warnings: list[str] = []
     if args.dry_run:
         return ok(
             "generate",
@@ -910,9 +932,10 @@ def cmd_edit(args: argparse.Namespace) -> int:
     if args.mask and not Path(args.mask).resolve().exists():
         return fail("edit", "MASK_NOT_FOUND", "Mask image does not exist", "Pass --mask with a readable PNG mask path.", {"mask": str(Path(args.mask).resolve())}, 2)
     provider = provider_config(args)
+    warnings: list[str] = []
+    gate_input_fidelity(args, provider, warnings)
     plan = edit_plan(args, provider, source, out)
     output_mime = mime_for_format(resolve_output_format(args))
-    warnings: list[str] = []
     if args.dry_run:
         return ok("edit", {"model": provider["model"], "plan": plan, "prompt": build_edit_prompt(args)}, warnings, **image_meta(out, output_mime, model=provider["model"]))
     if not provider["base_url"] or not provider["api_key"]:
@@ -1029,6 +1052,7 @@ def run_batch_item(job: dict[str, Any], defaults: argparse.Namespace) -> dict[st
                 raise ValueError(error_message)
             provider = provider_config(args)
             warnings: list[str] = []
+            gate_input_fidelity(args, provider, warnings)
             if args.dry_run:
                 return {
                     "id": item_id,
@@ -1066,6 +1090,7 @@ def run_batch_item(job: dict[str, Any], defaults: argparse.Namespace) -> dict[st
             out = Path(args.out).resolve()
             provider = provider_config(args)
             warnings: list[str] = []
+            gate_input_fidelity(args, provider, warnings)
             if args.dry_run:
                 return {
                     "id": item_id,
