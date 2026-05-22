@@ -20,6 +20,12 @@ from typing import Any
 
 DEFAULT_MODEL = "gpt-image-2"
 SECRET_KEY_RE = re.compile(r"(api[_-]?key|token|cookie|password|passwd|secret|authorization|bearer|set-cookie|client[_-]?secret)", re.I)
+
+
+class ResponsesApiError(RuntimeError):
+    def __init__(self, status: int, message: str) -> None:
+        super().__init__(message)
+        self.status = status
 SECRET_VALUE_RES = [
     re.compile(r"Bearer\s+[A-Za-z0-9._~+/=-]+", re.I),
     re.compile(r"(Authorization\s*[:=]\s*)[^\s\r\n]+", re.I),
@@ -126,7 +132,11 @@ def provider_config(args: argparse.Namespace) -> dict[str, str]:
 
 def responses_endpoint(base_url: str) -> str:
     base = base_url.rstrip("/")
-    return base if base.endswith("/responses") else f"{base}/responses"
+    for suffix in ("/responses", "/images/generations", "/images/edits", "/images"):
+        if base.endswith(suffix):
+            base = base[: -len(suffix)]
+            break
+    return f"{base}/responses"
 
 
 def images_edit_endpoint(base_url: str) -> str:
@@ -262,6 +272,41 @@ def image_data_url(path: Path) -> str:
     return f"data:{mime_for(path)};base64,{base64.b64encode(path.read_bytes()).decode('ascii')}"
 
 
+def normalized_mask_png_bytes(path: Path) -> bytes:
+    # OpenAI image-edit convention: only the alpha channel is read.
+    # alpha = 0 marks the region to edit; alpha = 255 marks regions to preserve.
+    # Input may be L/RGB (white = edit, black = preserve, by our docs) or RGBA
+    # (assume caller already follows OpenAI alpha polarity).
+    from PIL import Image
+
+    with Image.open(path) as img:
+        if img.mode == "RGBA":
+            rgba = img.copy()
+        else:
+            mask_l = img.convert("L")
+            edit_alpha = Image.eval(mask_l, lambda px: 255 - px)
+            opaque_rgb = Image.new("RGB", mask_l.size, (255, 255, 255))
+            rgba = Image.merge("RGBA", (*opaque_rgb.split(), edit_alpha))
+        with io.BytesIO() as buffer:
+            rgba.save(buffer, format="PNG")
+            return buffer.getvalue()
+
+
+def mask_data_url(path: Path) -> str:
+    return f"data:image/png;base64,{base64.b64encode(normalized_mask_png_bytes(path)).decode('ascii')}"
+
+
+def model_disallows_transparent_background(provider: dict[str, str]) -> bool:
+    return provider.get("model", "").startswith("gpt-image-2")
+
+
+def provider_background(args: argparse.Namespace, provider: dict[str, str]) -> str | None:
+    value = getattr(args, "background", None)
+    if value == "transparent" and model_disallows_transparent_background(provider):
+        return None
+    return value
+
+
 def response_payload(text: str) -> dict[str, Any]:
     if not text.startswith("event:") and not text.startswith("data:"):
         return json.loads(text)
@@ -303,8 +348,9 @@ def extract_image_base64(value: Any) -> str | None:
             for key in ("image_base64", "b64_json"):
                 if isinstance(item.get(key), str):
                     candidates.append(item[key])
-            if isinstance(item.get("result"), str) and re.match(r"^[A-Za-z0-9+/=]+", item["result"][:80]):
-                candidates.append(item["result"])
+            result = item.get("result")
+            if isinstance(result, str) and len(result) >= 40 and re.fullmatch(r"[A-Za-z0-9+/=]+", result[:100]):
+                candidates.append(result)
             if isinstance(item.get("url"), str) and item["url"].startswith("data:image/"):
                 candidates.append(item["url"].split(",", 1)[1])
             for nested in item.values():
@@ -393,7 +439,7 @@ def supported_tool_size(args: argparse.Namespace) -> str | None:
     return size if size in {"1024x1024", "1024x1536", "1536x1024"} else None
 
 
-def image_generation_tool(provider: dict[str, str], args: argparse.Namespace, action: str, mask: Path | None = None, include_mask_data: bool = True) -> dict[str, Any]:
+def image_generation_tool(provider: dict[str, str], args: argparse.Namespace, action: str, mask: Path | None = None, include_mask_data: bool = True, minimal_provider_tool: bool = False) -> dict[str, Any]:
     tool: dict[str, Any] = {
         "type": "image_generation",
         "action": action,
@@ -403,22 +449,25 @@ def image_generation_tool(provider: dict[str, str], args: argparse.Namespace, ac
     size = supported_tool_size(args)
     if size:
         tool["size"] = size
-    for arg_name, field_name in [
-        ("background", "background"),
-        ("quality", "quality"),
-        ("output_compression", "output_compression"),
-        ("input_fidelity", "input_fidelity"),
-        ("moderation", "moderation"),
-    ]:
-        value = getattr(args, arg_name, None)
-        if value is not None:
-            tool[field_name] = value
-    if mask is not None:
-        tool["input_image_mask"] = {"image_url": image_data_url(mask) if include_mask_data else "[MASK_DATA_URL_REDACTED]"}
+    if not minimal_provider_tool:
+        background = provider_background(args, provider)
+        if background is not None:
+            tool["background"] = background
+        for arg_name, field_name in [
+            ("quality", "quality"),
+            ("output_compression", "output_compression"),
+            ("input_fidelity", "input_fidelity"),
+            ("moderation", "moderation"),
+        ]:
+            value = getattr(args, arg_name, None)
+            if value is not None:
+                tool[field_name] = value
+    if mask is not None and not minimal_provider_tool:
+        tool["input_image_mask"] = {"image_url": mask_data_url(mask) if include_mask_data else "[MASK_DATA_URL_REDACTED]"}
     return tool
 
 
-def call_responses(provider: dict[str, str], source: Path | None, prompt: str, args: argparse.Namespace, action: str, mask: Path | None = None) -> dict[str, Any]:
+def call_responses(provider: dict[str, str], source: Path | None, prompt: str, args: argparse.Namespace, action: str, mask: Path | None = None, minimal_provider_tool: bool = False) -> dict[str, Any]:
     import requests
 
     content: list[dict[str, str]] = [
@@ -426,7 +475,7 @@ def call_responses(provider: dict[str, str], source: Path | None, prompt: str, a
     ]
     if source is not None:
         content.append({"type": "input_image", "image_url": image_data_url(source)})
-    tool = image_generation_tool(provider, args, action, mask)
+    tool = image_generation_tool(provider, args, action, mask, minimal_provider_tool=minimal_provider_tool)
 
     body = {
         "model": provider["model"],
@@ -446,7 +495,7 @@ def call_responses(provider: dict[str, str], source: Path | None, prompt: str, a
         timeout=180,
     )
     if not response.ok:
-        raise RuntimeError(f"Responses API failed {response.status_code}: {redact(decode_response_body(response)[:1000])}")
+        raise ResponsesApiError(response.status_code, f"Responses API failed {response.status_code}: {redact(decode_response_body(response)[:1000])}")
     return response_payload(decode_response_body(response))
 
 
@@ -457,7 +506,7 @@ def call_images_edit(provider: dict[str, str], source: Path, prompt: str, args: 
         "image": (source.name, source.read_bytes(), mime_for(source)),
     }
     if mask is not None:
-        files["mask"] = (mask.name, mask.read_bytes(), mime_for(mask))
+        files["mask"] = (mask.name, normalized_mask_png_bytes(mask), "image/png")
 
     data: dict[str, str] = {
         "prompt": prompt,
@@ -465,8 +514,10 @@ def call_images_edit(provider: dict[str, str], source: Path, prompt: str, args: 
         "size": f"{args.width}x{args.height}",
         "response_format": "b64_json",
     }
+    background = provider_background(args, provider)
+    if background is not None:
+        data["background"] = str(background)
     for arg_name, field_name in [
-        ("background", "background"),
         ("quality", "quality"),
         ("output_compression", "output_compression"),
         ("input_fidelity", "input_fidelity"),
@@ -491,14 +542,16 @@ def call_images_edit(provider: dict[str, str], source: Path, prompt: str, args: 
 def call_images_generate(provider: dict[str, str], prompt: str, args: argparse.Namespace) -> dict[str, Any]:
     import requests
 
-    data: dict[str, str] = {
+    body: dict[str, Any] = {
         "prompt": prompt,
         "model": provider["model"],
         "size": f"{args.width}x{args.height}",
         "response_format": "b64_json",
     }
+    background = provider_background(args, provider)
+    if background is not None:
+        body["background"] = background
     for arg_name, field_name in [
-        ("background", "background"),
         ("quality", "quality"),
         ("output_compression", "output_compression"),
         ("moderation", "moderation"),
@@ -507,12 +560,12 @@ def call_images_generate(provider: dict[str, str], prompt: str, args: argparse.N
     ]:
         value = getattr(args, arg_name, None)
         if value is not None:
-            data[field_name] = str(value)
+            body[field_name] = value
 
     response = requests.post(
         images_generation_endpoint(provider["base_url"]),
-        headers={"Authorization": f"Bearer {provider['api_key']}"},
-        data=data,
+        headers={"Authorization": f"Bearer {provider['api_key']}", "Content-Type": "application/json"},
+        data=json.dumps(body),
         timeout=180,
     )
     if not response.ok:
@@ -704,6 +757,17 @@ def mime_for_format(fmt: str) -> str:
     return {"png": "image/png", "webp": "image/webp", "jpeg": "image/jpeg"}.get(fmt, "image/png")
 
 
+def image_meta(out: Path, output_mime: str, *, with_media: bool = False, model: str | None = None, provider: str | None = "responses-compatible") -> dict[str, Any]:
+    meta: dict[str, Any] = {"output": str(out), "file": str(out), "mime": output_mime}
+    if with_media:
+        meta["media"] = str(out)
+    if provider is not None:
+        meta["provider"] = provider
+    if model is not None:
+        meta["model"] = model
+    return meta
+
+
 def encode_image(raw: bytes, args: argparse.Namespace) -> tuple[bytes, str]:
     fmt = resolve_output_format(args)
     if fmt == "png":
@@ -771,6 +835,7 @@ def edit_plan(args: argparse.Namespace, provider: dict[str, str], source: Path, 
         "tool": image_generation_tool(provider, args, "edit", Path(args.mask).resolve() if getattr(args, "mask", None) else None, include_mask_data=False),
         "editParameters": {
             "background": getattr(args, "background", None),
+            "providerBackground": provider_background(args, provider),
             "quality": getattr(args, "quality", None),
             "outputFormat": getattr(args, "output_format", None),
             "outputCompression": getattr(args, "output_compression", None),
@@ -798,16 +863,13 @@ def cmd_generate(args: argparse.Namespace) -> int:
     provider = provider_config(args)
     plan = generation_plan(args, provider, source, out)
     output_mime = mime_for_format(resolve_output_format(args))
+    warnings: list[str] = []
     if args.dry_run:
         return ok(
             "generate",
             {"model": provider["model"], "plan": plan},
-            [],
-            output=str(out),
-            file=str(out),
-            provider="responses-compatible",
-            model=provider["model"],
-            mime=output_mime,
+            warnings,
+            **image_meta(out, output_mime, model=provider["model"]),
         )
     if not provider["base_url"] or not provider["api_key"]:
         return fail("generate", "NO_PROVIDER_CONFIGURED", "Provider configuration is incomplete", "Set CLI args, IMAGEGEN_BASE_URL/IMAGEGEN_API_KEY, BASE_URL/API_KEY, or Codex config/auth.", status=2)
@@ -834,12 +896,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
             "generate",
             {"dimensions": dimensions, "bytes": len(output), "model": provider["model"], "plan": plan},
             [],
-            output=str(out),
-            file=str(out),
-            media=str(out),
-            provider="responses-compatible",
-            model=provider["model"],
-            mime=output_mime,
+            **image_meta(out, output_mime, with_media=True, model=provider["model"]),
         )
     except Exception as exc:
         return fail("generate", "GENERATION_FAILED", "Image generation failed", detail={"message": str(exc)})
@@ -856,18 +913,23 @@ def cmd_edit(args: argparse.Namespace) -> int:
     plan = edit_plan(args, provider, source, out)
     output_mime = mime_for_format(resolve_output_format(args))
     warnings: list[str] = []
-    if provider["model"].startswith("gpt-image-2") and args.background == "transparent":
-        warnings.append("gpt-image-2 does not support background=transparent in the official Images API; use opaque/auto plus postprocess/background removal")
     if args.dry_run:
-        return ok("edit", {"model": provider["model"], "plan": plan, "prompt": build_edit_prompt(args)}, warnings, output=str(out), file=str(out), provider="responses-compatible", model=provider["model"], mime=output_mime)
+        return ok("edit", {"model": provider["model"], "plan": plan, "prompt": build_edit_prompt(args)}, warnings, **image_meta(out, output_mime, model=provider["model"]))
     if not provider["base_url"] or not provider["api_key"]:
         return fail("edit", "NO_PROVIDER_CONFIGURED", "Provider configuration is incomplete", "Set CLI args, IMAGEGEN_BASE_URL/IMAGEGEN_API_KEY, BASE_URL/API_KEY, or Codex config/auth.", status=2)
     try:
         mask = Path(args.mask).resolve() if args.mask else None
+        retried_minimal_tool = False
         if use_legacy_images_edit_api(provider["base_url"]):
             response = call_images_edit(provider, source, build_edit_prompt(args), args, mask)
         else:
-            response = call_responses(provider, source, build_edit_prompt(args), args, "edit", mask)
+            try:
+                response = call_responses(provider, source, build_edit_prompt(args), args, "edit", mask)
+            except ResponsesApiError:
+                retried_minimal_tool = True
+                response = call_responses(provider, source, build_edit_prompt(args), args, "edit", mask, minimal_provider_tool=True)
+        if retried_minimal_tool:
+            warnings.append("provider rejected the full Responses image_generation edit tool; retried with a minimal provider-compatible tool")
         image_b64 = extract_image_base64(response)
         if not image_b64:
             raise RuntimeError("No edited image base64 found in model response.")
@@ -886,12 +948,7 @@ def cmd_edit(args: argparse.Namespace) -> int:
             "edit",
             {"dimensions": dimensions, "bytes": len(output), "model": provider["model"], "plan": plan},
             warnings,
-            output=str(out),
-            file=str(out),
-            media=str(out),
-            provider="responses-compatible",
-            model=provider["model"],
-            mime=output_mime,
+            **image_meta(out, output_mime, with_media=True, model=provider["model"]),
         )
     except Exception as exc:
         return fail("edit", "EDIT_FAILED", "Image edit failed", detail={"message": str(exc)})
@@ -904,9 +961,10 @@ def cmd_postprocess(args: argparse.Namespace) -> int:
         return fail("postprocess", "GENERATED_NOT_FOUND", "Generated image does not exist", detail={"generated": str(generated)}, status=2)
     try:
         output = postprocess_bytes(generated.read_bytes(), args)
+        output, output_mime = encode_image(output, args)
         write_output(out, output)
         dimensions = image_dimensions(out)
-        return ok("postprocess", {"dimensions": dimensions, "bytes": len(output)}, [], output=str(out), file=str(out), media=str(out), mime="image/png")
+        return ok("postprocess", {"dimensions": dimensions, "bytes": len(output)}, [], **image_meta(out, output_mime, with_media=True, provider=None))
     except Exception as exc:
         return fail("postprocess", "POSTPROCESS_FAILED", "Image postprocess failed", detail={"message": str(exc)})
 
@@ -926,7 +984,6 @@ def batch_job_namespace(job: dict[str, Any], defaults: argparse.Namespace) -> ar
         api_key=job.get("api_key") or defaults.api_key,
         model=job.get("model") or defaults.model,
         dry_run=bool(job.get("dry_run", defaults.dry_run)),
-        execute=bool(job.get("execute", defaults.execute)),
         extra_prompt=job.get("extra_prompt"),
         guidance_file=job.get("guidance_file"),
         size_limit=int(job["size_limit"]) if job.get("size_limit") is not None else None,
@@ -953,13 +1010,14 @@ def run_batch_item(job: dict[str, Any], defaults: argparse.Namespace) -> dict[st
             generated = Path(args.generated).resolve()
             out = Path(args.out).resolve()
             output = postprocess_bytes(generated.read_bytes(), args)
+            output, output_mime = encode_image(output, args)
             write_output(out, output)
             return {
                 "id": item_id,
                 "command": command,
                 "ok": True,
                 "file": str(out),
-                "mime": "image/png",
+                "mime": output_mime,
                 "dimensions": image_dimensions(out),
                 "bytes": len(output),
             }
@@ -970,6 +1028,7 @@ def run_batch_item(job: dict[str, Any], defaults: argparse.Namespace) -> dict[st
             if error_code:
                 raise ValueError(error_message)
             provider = provider_config(args)
+            warnings: list[str] = []
             if args.dry_run:
                 return {
                     "id": item_id,
@@ -978,6 +1037,7 @@ def run_batch_item(job: dict[str, Any], defaults: argparse.Namespace) -> dict[st
                     "dryRun": True,
                     "file": str(out),
                     "plan": generation_plan(args, provider, source, out),
+                    "warnings": warnings,
                 }
             if not provider["base_url"] or not provider["api_key"]:
                 raise RuntimeError("Provider environment is incomplete")
@@ -999,11 +1059,13 @@ def run_batch_item(job: dict[str, Any], defaults: argparse.Namespace) -> dict[st
                 "mime": output_mime,
                 "dimensions": image_dimensions(out),
                 "bytes": len(output),
+                "warnings": warnings,
             }
         if command == "edit":
             source = Path(args.source).resolve()
             out = Path(args.out).resolve()
             provider = provider_config(args)
+            warnings: list[str] = []
             if args.dry_run:
                 return {
                     "id": item_id,
@@ -1012,6 +1074,7 @@ def run_batch_item(job: dict[str, Any], defaults: argparse.Namespace) -> dict[st
                     "dryRun": True,
                     "file": str(out),
                     "plan": edit_plan(args, provider, source, out),
+                    "warnings": warnings,
                 }
             if not provider["base_url"] or not provider["api_key"]:
                 raise RuntimeError("Provider environment is incomplete")
@@ -1034,6 +1097,7 @@ def run_batch_item(job: dict[str, Any], defaults: argparse.Namespace) -> dict[st
                 "mime": output_mime,
                 "dimensions": image_dimensions(out),
                 "bytes": len(output),
+                "warnings": warnings,
             }
         raise ValueError(f"Unsupported batch command: {command}")
     except Exception as exc:
@@ -1044,8 +1108,13 @@ def cmd_batch(args: argparse.Namespace) -> int:
     jobs_path = Path(args.jobs).resolve()
     report_path = Path(args.out).resolve() if args.out else None
     try:
-        payload = json.loads(jobs_path.read_text(encoding="utf-8"))
-        jobs = payload.get("jobs", payload if isinstance(payload, list) else [])
+        payload = json.loads(jobs_path.read_text(encoding="utf-8-sig"))
+        if isinstance(payload, list):
+            jobs = payload
+        elif isinstance(payload, dict):
+            jobs = payload.get("jobs", [])
+        else:
+            jobs = []
         if not isinstance(jobs, list):
             return fail("batch", "INVALID_JOBS", "Batch jobs file must contain a list or a { jobs: [] } object", status=2)
         items = [run_batch_item(job, args) for job in jobs]
@@ -1143,13 +1212,14 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--api-key", dest="api_key")
     generate.add_argument("--model")
     generate.add_argument("--dry-run", action="store_true")
-    generate.add_argument("--execute", action="store_true")
     generate.add_argument("--extra-prompt", dest="extra_prompt")
     generate.add_argument("--guidance-file", dest="guidance_file")
     generate.add_argument("--size-limit", dest="size_limit", type=positive_int)
     generate.add_argument("--text-composite-spec", dest="text_composite_spec")
     generate.add_argument("--preserve-source-alpha", dest="preserve_source_alpha", action="store_true")
     generate.add_argument("--transparent-edge-background", dest="transparent_edge_background", action="store_true")
+    generate.add_argument("--background", choices=["transparent", "opaque", "auto"])
+    generate.add_argument("--quality", choices=["low", "medium", "high", "auto", "standard"])
     generate.add_argument("--output-format", dest="output_format", choices=["png", "webp", "jpeg"])
     generate.add_argument("--output-compression", dest="output_compression", type=compression_int)
     generate.set_defaults(func=cmd_generate)
@@ -1167,7 +1237,6 @@ def build_parser() -> argparse.ArgumentParser:
     edit.add_argument("--api-key", dest="api_key")
     edit.add_argument("--model")
     edit.add_argument("--dry-run", action="store_true")
-    edit.add_argument("--execute", action="store_true")
     edit.add_argument("--extra-prompt", dest="extra_prompt")
     edit.add_argument("--guidance-file", dest="guidance_file")
     edit.add_argument("--size-limit", dest="size_limit", type=positive_int)
@@ -1193,6 +1262,8 @@ def build_parser() -> argparse.ArgumentParser:
     postprocess.add_argument("--text-composite-spec", dest="text_composite_spec")
     postprocess.add_argument("--preserve-source-alpha", dest="preserve_source_alpha", action="store_true")
     postprocess.add_argument("--transparent-edge-background", dest="transparent_edge_background", action="store_true")
+    postprocess.add_argument("--output-format", dest="output_format", choices=["png", "webp", "jpeg"])
+    postprocess.add_argument("--output-compression", dest="output_compression", type=compression_int)
     postprocess.set_defaults(func=cmd_postprocess)
 
     batch = subparsers.add_parser("batch")
@@ -1202,7 +1273,6 @@ def build_parser() -> argparse.ArgumentParser:
     batch.add_argument("--api-key", dest="api_key")
     batch.add_argument("--model")
     batch.add_argument("--dry-run", action="store_true")
-    batch.add_argument("--execute", action="store_true")
     batch.set_defaults(func=cmd_batch)
 
     cleanup = subparsers.add_parser("cleanup")

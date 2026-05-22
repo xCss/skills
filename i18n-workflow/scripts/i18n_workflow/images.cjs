@@ -1072,7 +1072,6 @@ function runImagegenWorkflowGenerate(candidate, language, text) {
     '--out', outputPath,
     '--model', process.env.I18N_IMAGE_MODEL || 'gpt-image-2',
     '--guidance-file', guidancePath,
-    '--execute',
     ]);
     const buffer = fs.readFileSync(outputPath);
     fs.rmSync(outputPath, { force: true });
@@ -1228,7 +1227,6 @@ function runImagegenWorkflowEdit(candidate, language, text) {
       '--out', outputPath,
       '--model', process.env.I18N_IMAGE_MODEL || 'gpt-image-2',
       '--guidance-file', guidancePath,
-      '--execute',
     ]);
     const buffer = fs.readFileSync(outputPath);
     fs.rmSync(outputPath, { force: true });

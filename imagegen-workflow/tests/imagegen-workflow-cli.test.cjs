@@ -17,6 +17,9 @@ function runCli(args, options = {}) {
     UV_PROJECT_ENVIRONMENT: uvEnv,
     UV_LINK_MODE: 'copy',
   };
+  delete env.PYTHONHOME;
+  delete env.PYTHONPATH;
+  delete env.VIRTUAL_ENV;
   const spawnOptions = { ...options };
   delete spawnOptions.env;
   return spawnSync('uv', ['run', 'python', cli, ...args], {
@@ -35,6 +38,9 @@ function runCliAsync(args, options = {}) {
     UV_PROJECT_ENVIRONMENT: uvEnv,
     UV_LINK_MODE: 'copy',
   };
+  delete env.PYTHONHOME;
+  delete env.PYTHONPATH;
+  delete env.VIRTUAL_ENV;
   return new Promise(resolve => {
     const child = spawn('uv', ['run', 'python', cli, ...args], {
       cwd: root,
@@ -61,6 +67,39 @@ function writePng(filePath, width, height) {
   const payload = base64BySize[`${width}x${height}`];
   assert.ok(payload, `missing fixture for ${width}x${height}`);
   fs.writeFileSync(filePath, Buffer.from(payload, 'base64'));
+}
+
+function pngColorTypeFromDataUrl(dataUrl) {
+  const marker = 'base64,';
+  const markerIndex = dataUrl.indexOf(marker);
+  assert.notStrictEqual(markerIndex, -1, 'missing base64 data URL marker');
+  const bytes = Buffer.from(dataUrl.slice(markerIndex + marker.length), 'base64');
+  assert.strictEqual(bytes.slice(12, 16).toString('ascii'), 'IHDR');
+  return bytes[25];
+}
+
+function writeLMask(filePath, width, height, fillFn) {
+  const py = [
+    'import sys, os',
+    'from PIL import Image, ImageDraw',
+    `img = Image.new('L', (${width}, ${height}), 0)`,
+    'd = ImageDraw.Draw(img)',
+    ...fillFn,
+    `img.save(r'${filePath.replace(/\\/g, '\\\\')}')`,
+  ].join('\n');
+  const scriptPath = filePath + '.py';
+  fs.writeFileSync(scriptPath, py);
+  try {
+    const result = spawnSync('uv', ['run', 'python', scriptPath], {
+      cwd: root,
+      encoding: 'utf8',
+      shell: process.platform === 'win32',
+      env: { ...process.env, UV_PROJECT_ENVIRONMENT: uvEnv, UV_LINK_MODE: 'copy' },
+    });
+    assert.strictEqual(result.status, 0, result.stderr);
+  } finally {
+    fs.rmSync(scriptPath, { force: true });
+  }
 }
 
 test('help describes imagegen workflow CLI', () => {
@@ -230,9 +269,9 @@ test('generate execute without source sends text-only Responses request', async 
       '--width', '1',
       '--height', '1',
       '--out', out,
+      '--background', 'transparent',
       '--base-url', `http://127.0.0.1:${server.address().port}/v1`,
       '--api-key', 'TEST_ONLY_IMAGEGEN_GENERATE_KEY',
-      '--execute',
     ]);
     assert.strictEqual(result.status, 0, result.stderr);
     const payload = parseJson(result.stdout);
@@ -248,6 +287,8 @@ test('generate execute without source sends text-only Responses request', async 
       model: 'gpt-image-2',
       output_format: 'png',
     }]);
+    assert.strictEqual(Object.hasOwn(requestBody.tools[0], 'background'), false);
+    assert.deepStrictEqual(payload.warnings, []);
     assert.deepStrictEqual(requestBody.tool_choice, { type: 'image_generation' });
     assert.doesNotMatch(result.stdout, /TEST_ONLY_IMAGEGEN_GENERATE_KEY/);
   } finally {
@@ -261,6 +302,7 @@ test('generate can post to the legacy /v1/images/generations endpoint for text-o
   const out = path.join(tempRoot, 'out.png');
   let requestUrl = null;
   let requestHeaders = null;
+  let requestBody = '';
   const server = http.createServer((req, res) => {
     requestUrl = req.url;
     requestHeaders = req.headers;
@@ -268,10 +310,12 @@ test('generate can post to the legacy /v1/images/generations endpoint for text-o
       let body = '';
       req.on('data', chunk => { body += chunk; });
       req.on('end', () => {
-        assert.match(requestHeaders['content-type'] || '', /application\/x-www-form-urlencoded/);
-        assert.match(body, /fresh-blue-icon/);
-        assert.match(body, /size=1x1/);
-        assert.match(body, /response_format=b64_json/);
+        requestBody = body;
+        assert.match(requestHeaders['content-type'] || '', /application\/json/);
+        const parsed = JSON.parse(body);
+        assert.strictEqual(parsed.prompt.includes('fresh-blue-icon'), true);
+        assert.strictEqual(parsed.size, '1x1');
+        assert.strictEqual(parsed.response_format, 'b64_json');
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           data: [{ b64_json: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=' }],
@@ -291,6 +335,7 @@ test('generate can post to the legacy /v1/images/generations endpoint for text-o
       '--width', '1',
       '--height', '1',
       '--out', out,
+      '--background', 'transparent',
       '--base-url', `http://127.0.0.1:${server.address().port}/v1/images/generations`,
       '--api-key', 'TEST_ONLY_LEGACY_IMAGES_GENERATE_KEY',
     ]);
@@ -300,6 +345,9 @@ test('generate can post to the legacy /v1/images/generations endpoint for text-o
     assert.strictEqual(payload.command, 'generate');
     assert.strictEqual(requestUrl, '/v1/images/generations');
     assert.strictEqual(fs.existsSync(out), true);
+    const parsedBody = JSON.parse(requestBody);
+    assert.strictEqual(Object.hasOwn(parsedBody, 'background'), false);
+    assert.deepStrictEqual(payload.warnings, []);
     assert.doesNotMatch(result.stdout, /TEST_ONLY_LEGACY_IMAGES_GENERATE_KEY/);
   } finally {
     await new Promise(resolve => server.close(resolve));
@@ -438,6 +486,36 @@ test('self-test reports its own command', () => {
   assert.strictEqual(payload.data.postprocess.dimensions.height, 2);
 });
 
+test('batch accepts a bare list jobs file (no jobs wrapper)', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'imagegen-workflow-batch-list-'));
+  try {
+    const generated = path.join(tempRoot, 'generated.png');
+    const out = path.join(tempRoot, 'out.png');
+    const jobs = path.join(tempRoot, 'jobs.json');
+    const report = path.join(tempRoot, 'report.json');
+    writePng(generated, 1, 1);
+    fs.writeFileSync(jobs, JSON.stringify([{
+      id: 'bare-list',
+      command: 'postprocess',
+      generated,
+      width: 2,
+      height: 2,
+      out,
+    }], null, 2));
+    const result = runCli(['batch', '--jobs', jobs, '--out', report]);
+    assert.strictEqual(result.status, 0, result.stderr);
+    const payload = parseJson(result.stdout);
+    assert.strictEqual(payload.ok, true);
+    assert.strictEqual(payload.data.summary.total, 1);
+    assert.strictEqual(payload.data.summary.ok, 1);
+    assert.strictEqual(payload.data.items[0].id, 'bare-list');
+    assert.strictEqual(payload.data.items[0].ok, true);
+    assert.strictEqual(fs.existsSync(out), true);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test('batch can run offline postprocess jobs and write a report', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'imagegen-workflow-batch-'));
   try {
@@ -500,6 +578,40 @@ test('batch can dry-run text-only generate jobs without source', () => {
     assert.strictEqual(payload.data.items[0].command, 'generate');
     assert.strictEqual(payload.data.items[0].dryRun, true);
     assert.strictEqual(payload.data.items[0].plan.source, null);
+    assert.strictEqual(fs.existsSync(out), false);
+    assert.strictEqual(fs.existsSync(report), true);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('batch accepts UTF-8 BOM jobs files', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'imagegen-workflow-batch-bom-'));
+  try {
+    const out = path.join(tempRoot, 'out.png');
+    const jobs = path.join(tempRoot, 'jobs.json');
+    const report = path.join(tempRoot, 'report.json');
+    fs.writeFileSync(jobs, '\uFEFF' + JSON.stringify({
+      jobs: [{
+        id: 'bom-icon',
+        command: 'generate',
+        text: 'bom-blue-icon',
+        language: 'en',
+        width: 128,
+        height: 64,
+        out,
+        dry_run: true,
+      }],
+    }, null, 2));
+    const result = runCli(['batch', '--jobs', jobs, '--out', report]);
+    assert.strictEqual(result.status, 0, result.stderr);
+    const payload = parseJson(result.stdout);
+    assert.strictEqual(payload.ok, true);
+    assert.strictEqual(payload.command, 'batch');
+    assert.strictEqual(payload.data.summary.total, 1);
+    assert.strictEqual(payload.data.summary.ok, 1);
+    assert.strictEqual(payload.data.items[0].id, 'bom-icon');
+    assert.strictEqual(payload.data.items[0].dryRun, true);
     assert.strictEqual(fs.existsSync(out), false);
     assert.strictEqual(fs.existsSync(report), true);
   } finally {
@@ -618,6 +730,7 @@ test('edit execute sends Responses image_generation edit tool with mask', async 
       '--width', '1',
       '--height', '1',
       '--out', out,
+      '--background', 'transparent',
       '--quality', 'medium',
       '--output-format', 'png',
       '--base-url', `http://127.0.0.1:${server.address().port}/v1`,
@@ -641,7 +754,10 @@ test('edit execute sends Responses image_generation edit tool with mask', async 
         image_url: requestBody.tools[0].input_image_mask.image_url,
       },
     }]);
+    assert.strictEqual(Object.hasOwn(requestBody.tools[0], 'background'), false);
+    assert.deepStrictEqual(payload.warnings, []);
     assert.match(requestBody.tools[0].input_image_mask.image_url, /^data:image\/png;base64,/);
+    assert.strictEqual(pngColorTypeFromDataUrl(requestBody.tools[0].input_image_mask.image_url), 6);
     assert.deepStrictEqual(requestBody.tool_choice, { type: 'image_generation' });
     assert.doesNotMatch(result.stdout, /TEST_ONLY_IMAGEGEN_EDIT_KEY/);
   } finally {
@@ -659,6 +775,7 @@ test('edit can post to the legacy /v1/images/edits endpoint when the base URL ta
   writePng(mask, 1, 1);
   let requestUrl = null;
   let requestHeaders = null;
+  let requestBody = '';
   const server = http.createServer((req, res) => {
     requestUrl = req.url;
     requestHeaders = req.headers;
@@ -666,6 +783,7 @@ test('edit can post to the legacy /v1/images/edits endpoint when the base URL ta
       let body = '';
       req.on('data', chunk => { body += chunk; });
       req.on('end', () => {
+        requestBody = body;
         assert.match(requestHeaders['content-type'] || '', /multipart\/form-data/);
         assert.match(body, /name="prompt"/);
         assert.match(body, /name="image"/);
@@ -691,6 +809,7 @@ test('edit can post to the legacy /v1/images/edits endpoint when the base URL ta
       '--width', '1',
       '--height', '1',
       '--out', out,
+      '--background', 'transparent',
       '--quality', 'medium',
       '--output-format', 'png',
       '--base-url', `http://127.0.0.1:${server.address().port}/v1/images/edits`,
@@ -702,7 +821,213 @@ test('edit can post to the legacy /v1/images/edits endpoint when the base URL ta
     assert.strictEqual(payload.command, 'edit');
     assert.strictEqual(requestUrl, '/v1/images/edits');
     assert.strictEqual(fs.existsSync(out), true);
+    assert.doesNotMatch(requestBody, /name="background"/);
+    assert.deepStrictEqual(payload.warnings, []);
     assert.doesNotMatch(result.stdout, /TEST_ONLY_LEGACY_IMAGES_EDIT_KEY/);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('postprocess re-encodes output to webp when --output-format webp', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'imagegen-workflow-postprocess-webp-'));
+  try {
+    const generated = path.join(tempRoot, 'generated.png');
+    const out = path.join(tempRoot, 'out.webp');
+    writePng(generated, 1, 1);
+    const result = runCli([
+      'postprocess',
+      '--generated', generated,
+      '--width', '2',
+      '--height', '2',
+      '--out', out,
+      '--output-format', 'webp',
+    ]);
+    assert.strictEqual(result.status, 0, result.stderr);
+    const payload = parseJson(result.stdout);
+    assert.strictEqual(payload.ok, true);
+    assert.strictEqual(payload.mime, 'image/webp');
+    assert.strictEqual(fs.existsSync(out), true);
+    const header = fs.readFileSync(out).slice(0, 12);
+    assert.strictEqual(header.slice(0, 4).toString('ascii'), 'RIFF');
+    assert.strictEqual(header.slice(8, 12).toString('ascii'), 'WEBP');
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('generate routes legacy /v1/images/generations base URL to /v1/responses when --source is provided', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'imagegen-workflow-legacy-plus-source-'));
+  const source = path.join(tempRoot, 'source.png');
+  const out = path.join(tempRoot, 'out.png');
+  writePng(source, 1, 1);
+  let requestUrl = null;
+  const server = http.createServer((req, res) => {
+    requestUrl = req.url;
+    if (req.url === '/v1/responses') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          output: [{ type: 'image_generation_call', result: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=' }],
+        }));
+      });
+      return;
+    }
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end('{}');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const result = await runCliAsync([
+      'generate',
+      '--source', source,
+      '--text', 'Start',
+      '--language', 'en',
+      '--width', '1',
+      '--height', '1',
+      '--out', out,
+      '--base-url', `http://127.0.0.1:${server.address().port}/v1/images/generations`,
+      '--api-key', 'TEST_ONLY_LEGACY_SOURCE_KEY',
+    ]);
+    assert.strictEqual(result.status, 0, result.stderr);
+    assert.strictEqual(requestUrl, '/v1/responses');
+    assert.strictEqual(fs.existsSync(out), true);
+    assert.doesNotMatch(result.stdout, /TEST_ONLY_LEGACY_SOURCE_KEY/);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('edit retries with minimal Responses tool when provider rejects the full tool', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'imagegen-workflow-edit-retry-'));
+  const source = path.join(tempRoot, 'source.png');
+  const out = path.join(tempRoot, 'out.png');
+  writePng(source, 1, 1);
+  let calls = 0;
+  let firstToolHadBackground = null;
+  let secondToolHadBackground = null;
+  const server = http.createServer((req, res) => {
+    if (req.url === '/v1/responses') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        calls += 1;
+        const parsed = JSON.parse(body);
+        const tool = parsed.tools[0];
+        if (calls === 1) {
+          firstToolHadBackground = Object.hasOwn(tool, 'quality');
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: { message: 'tool parameter not supported' } }));
+          return;
+        }
+        secondToolHadBackground = Object.hasOwn(tool, 'quality');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          output: [{ type: 'image_generation_call', result: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=' }],
+        }));
+      });
+      return;
+    }
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end('{}');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const result = await runCliAsync([
+      'edit',
+      '--source', source,
+      '--text', 'Go',
+      '--language', 'en',
+      '--width', '1',
+      '--height', '1',
+      '--out', out,
+      '--quality', 'medium',
+      '--base-url', `http://127.0.0.1:${server.address().port}/v1`,
+      '--api-key', 'TEST_ONLY_RETRY_KEY',
+    ]);
+    assert.strictEqual(result.status, 0, result.stderr);
+    assert.strictEqual(calls, 2);
+    assert.strictEqual(firstToolHadBackground, true);
+    assert.strictEqual(secondToolHadBackground, false);
+    const payload = parseJson(result.stdout);
+    assert.strictEqual(payload.ok, true);
+    assert.match(payload.warnings[0], /retried with a minimal provider-compatible tool/);
+    assert.doesNotMatch(result.stdout, /TEST_ONLY_RETRY_KEY/);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('edit normalizes L-mode mask to OpenAI alpha polarity (white=edit -> alpha=0)', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'imagegen-workflow-mask-polarity-'));
+  const source = path.join(tempRoot, 'source.png');
+  const mask = path.join(tempRoot, 'mask.png');
+  const out = path.join(tempRoot, 'out.png');
+  writePng(source, 2, 2);
+  writeLMask(mask, 2, 2, [
+    'img.putpixel((0, 0), 255)',
+    'img.putpixel((1, 0), 0)',
+    'img.putpixel((0, 1), 0)',
+    'img.putpixel((1, 1), 255)',
+  ]);
+  let receivedMaskUrl = null;
+  const server = http.createServer((req, res) => {
+    if (req.url === '/v1/responses') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        const parsed = JSON.parse(body);
+        receivedMaskUrl = parsed.tools[0].input_image_mask.image_url;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          output: [{ type: 'image_generation_call', result: 'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR42mP8z8BQz0AEYBxVSF+FAAZ+AgMDZ6evAAAAAElFTkSuQmCC' }],
+        }));
+      });
+      return;
+    }
+    res.writeHead(404).end('{}');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const result = await runCliAsync([
+      'edit',
+      '--source', source,
+      '--mask', mask,
+      '--text', 'Go',
+      '--language', 'en',
+      '--width', '2',
+      '--height', '2',
+      '--out', out,
+      '--base-url', `http://127.0.0.1:${server.address().port}/v1`,
+      '--api-key', 'TEST_ONLY_MASK_POLARITY_KEY',
+    ]);
+    assert.strictEqual(result.status, 0, result.stderr);
+    assert.match(receivedMaskUrl, /^data:image\/png;base64,/);
+    const pngBase64 = receivedMaskUrl.split(',')[1];
+    const maskBytesPath = path.join(tempRoot, 'received_mask.png');
+    fs.writeFileSync(maskBytesPath, Buffer.from(pngBase64, 'base64'));
+    const scriptPath = path.join(tempRoot, 'read_alphas.py');
+    fs.writeFileSync(scriptPath, [
+      'from PIL import Image',
+      `img = Image.open(r'${maskBytesPath.replace(/\\/g, '\\\\')}').convert("RGBA")`,
+      'alphas = [img.getpixel((x, y))[3] for y in range(img.height) for x in range(img.width)]',
+      'print(",".join(str(a) for a in alphas))',
+    ].join('\n'));
+    const inspect = spawnSync('uv', ['run', 'python', scriptPath], {
+      cwd: root,
+      encoding: 'utf8',
+      shell: process.platform === 'win32',
+      env: { ...process.env, UV_PROJECT_ENVIRONMENT: uvEnv, UV_LINK_MODE: 'copy' },
+    });
+    assert.strictEqual(inspect.status, 0, inspect.stderr);
+    const alphas = inspect.stdout.trim().split(',').map(Number);
+    assert.deepStrictEqual(alphas, [0, 255, 255, 0], 'white pixels must become alpha=0 (edit), black pixels alpha=255 (preserve)');
+    assert.doesNotMatch(result.stdout, /TEST_ONLY_MASK_POLARITY_KEY/);
   } finally {
     await new Promise(resolve => server.close(resolve));
     fs.rmSync(tempRoot, { recursive: true, force: true });

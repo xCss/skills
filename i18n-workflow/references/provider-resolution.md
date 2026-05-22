@@ -43,7 +43,7 @@ Expected behavior:
 - `run --dry-run` must not consume API calls.
 - `run --execute` performs real classification or image generation when those steps are selected. Treat the user's request for real model output as consent to execute; do not require a second API-usage confirmation.
 - The `classify` step calls the Responses API with provider settings from `I18N_CLASSIFY_*`, `BASE_URL` / `API_KEY`, or Codex config/auth files.
-- The `generate` step invokes `imagegen-workflow/scripts/imagegen_workflow_cli.py generate --execute` for model-backed images. Image generation resolves provider settings through `--base-url` / `--api-key`, `IMAGEGEN_*`, `BASE_URL` / `API_KEY`, then Codex config/auth files.
+- The `generate` step invokes `imagegen-workflow/scripts/imagegen_workflow_cli.py generate` for model-backed images (executes by default). Image generation resolves provider settings through `--base-url` / `--api-key`, `IMAGEGEN_*`, `BASE_URL` / `API_KEY`, then Codex config/auth files.
 - Generated image postprocessing is delegated to `imagegen-workflow/scripts/imagegen_workflow_cli.py postprocess`; `i18n-workflow` keeps i18n-specific size checks, output placement, manifest updates, and Cocos `.meta` creation.
 
 ## Safe Output Rules

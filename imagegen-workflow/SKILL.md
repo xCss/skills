@@ -35,7 +35,7 @@ uv run python scripts/imagegen_workflow_cli.py cleanup /tmp/imagegen-workflow-ar
 
 The CLI prints one JSON object to stdout. Diagnostics and human-readable logs must go to stderr. Never write API keys, tokens, cookies, passwords, full Authorization headers, `.env` contents, or connection strings to output.
 
-`generate` and `edit` execute by default and consume provider API calls. Pass `--dry-run` to inspect the plan without spending API calls. The legacy `--execute` flag is still accepted for backwards compatibility but is a no-op.
+`generate` and `edit` execute by default and consume provider API calls. Pass `--dry-run` to inspect the plan without spending API calls.
 
 Output format follows `--out` unless overridden by `--output-format`; see `references/cli-usage.md` for compression and JSON details.
 
@@ -113,11 +113,11 @@ Use this section only after P1 no-mask edit and P2 text-composite cleanup fail, 
 
 **From textComposite geometry:**
 - Input: source image dimensions + `textComposite` object with `{ x, y, width, height }` (or polygon `{ points: [{x,y},...] }`).
-- Create a grayscale PNG with the same dimensions as the source.
+- Create a same-size black/white mask PNG. The CLI accepts L/RGB/RGBA input masks and normalizes them to RGBA PNG before provider upload.
 - Fill the target region with `#FFFFFF` (white = edit region).
 - Fill everything else with `#000000` (black = preserved).
 - If the composite describes a polygon, use Pillow `ImageDraw.polygon`.
-- Save as grayscale PNG and pass as `--mask`.
+- Save as PNG and pass as `--mask`. If bypassing the CLI and posting directly to a provider endpoint, send a PNG with an alpha channel; L/RGB masks can fail with `mask image missing alpha channel`.
 
 **From source-image auto-detection (last resort):**
 - Use OCR or Pillow contour analysis only when no project mask/geometry exists and a constrained P4 retry is still preferable to full regeneration.
@@ -140,7 +140,7 @@ For localized text-image failures (ghost source text, clipped translated text, w
 - Do not accept generated images because the file exists; always inspect dimensions, alpha, fringe, residue, and style.
 - Do not use full `generate` when `edit --source source.png` can modify the existing image.
 - Do not create an `edit` mask that is smaller than the source image; the mask must have identical dimensions. Resize or pad before passing.
-- Do not use a mask with alpha channel or color content; the mask must be grayscale PNG — white (#FFFFFF) = edit region, black (#000000) = preserved region.
+- Do not rely on raw L/RGB mask bytes when bypassing this CLI; some provider endpoints require mask PNGs to include an alpha channel. Through this CLI, `--mask` input is normalized to RGBA PNG automatically.
 - Do not call `edit --mask` with a mask that does not cover the full target text; partial masks often leave ghost characters.
 - For H5 game i18n, no-mask edit is the default (P1). Mask synthesis from geometry is P4 and rarely used. See Mask Source Priority above.
 

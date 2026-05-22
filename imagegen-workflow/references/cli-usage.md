@@ -20,13 +20,13 @@ uv run python scripts/imagegen_workflow_cli.py cleanup /tmp/imagegen-workflow-ar
 uv run python scripts/imagegen_workflow_cli.py self-test
 ```
 
-`generate` and `edit` execute by default; pass `--dry-run` to inspect the plan without spending API calls. `--execute` is accepted but no-op (kept for backwards compatibility).
+`generate` and `edit` execute by default; pass `--dry-run` to inspect the plan without spending API calls.
 
 The output format is detected from the `--out` extension (`.png`, `.webp`, `.jpg`/`.jpeg`). To override or set quality, pass `--output-format png|webp|jpeg` and `--output-compression 0..100`. `generate` and `edit` both apply local re-encoding for non-PNG targets, since the underlying Responses-compatible transport always returns PNG bytes.
 
 ## JSON Contract
 
-Success:
+Success (representative shape; field set varies by command):
 
 ```json
 {
@@ -34,13 +34,21 @@ Success:
   "command": "generate",
   "output": "/tmp/out.png",
   "file": "/tmp/out.png",
+  "media": "/tmp/out.png",
   "provider": "responses-compatible",
   "model": "gpt-image-2",
   "mime": "image/png",
-  "data": {},
+  "data": {
+    "dimensions": { "width": 256, "height": 96 },
+    "bytes": 16384,
+    "model": "gpt-image-2",
+    "plan": { "...": "command-specific" }
+  },
   "warnings": []
 }
 ```
+
+`generate`, `edit`, `postprocess`, and successful `batch` items include `data.dimensions` and `data.bytes`. Dry-runs include `data.plan` (and `data.prompt` for `edit`) but no `dimensions`/`bytes`. `batch` itself returns `data.summary` plus a `data.items` list; each item carries the per-job shape above.
 
 Edit success uses the same JSON shape with `"command": "edit"`, `provider: "responses-compatible"`, and a `data.plan.endpoint` of `/responses`. The plan includes a `tool` object with `type: "image_generation"` and `action: "edit"`. If `--mask` is supplied, it is sent through the tool's `input_image_mask`; otherwise the edit is maskless.
 
@@ -76,7 +84,7 @@ When a Responses image call succeeds, inspect the returned `image_generation_cal
 
 When cc-switch is managing Codex providers, the CLI does not call `cc-switch` directly. It follows the current Codex provider/base_url by reading `$CODEX_HOME/config.toml` and `$CODEX_HOME/auth.json`, or `~/.codex/config.toml` and `~/.codex/auth.json` when `CODEX_HOME` is unset. It does not auto-discover a local `127.0.0.1:<port>` proxy.
 
-Batch input may be either a list or an object with `jobs`. Each job should include `id`, `command`, and the command-specific arguments. Example:
+Batch input may be either a bare list or an object with `jobs`. Each job should include `id`, `command`, and the command-specific arguments. Use `out` (not `output`) for the per-job destination path; `--out` on the top-level `batch` command writes the aggregate report. Example using the object form:
 
 ```json
 {
@@ -138,7 +146,7 @@ For H5 game i18n (default, no-mask) omit `mask`:
 }
 ```
 
-Explicit mask (P4, rare):
+Explicit mask (P4, rare). The mask path may point to an L/RGB/RGBA PNG; the CLI normalizes it to a same-size RGBA PNG before sending provider requests. If you bypass the CLI and call a provider endpoint directly, include an alpha channel in the mask PNG or the provider may reject it as missing alpha:
 
 ```json
 {
@@ -159,4 +167,21 @@ Explicit mask (P4, rare):
     }
   ]
 }
+```
+
+The bare-list form is also accepted (no `jobs` wrapper). Use it when the caller already builds a job array:
+
+```json
+[
+  {
+    "id": "fresh-icon",
+    "command": "generate",
+    "text": "fresh-blue-icon",
+    "language": "en",
+    "width": 240,
+    "height": 80,
+    "out": "/tmp/out.png",
+    "dry_run": true
+  }
+]
 ```
