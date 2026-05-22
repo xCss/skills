@@ -63,6 +63,7 @@ test-results/
 
 # Agent/runtime local state
 .omx/
+.claude/
 
 # Imagegen workflow generated artifacts
 imagegen-workflow/jobs.json
