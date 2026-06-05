@@ -43,6 +43,10 @@ function configuredRoots(values, fallback, config) {
   return roots.map(root => resolveRoot(root, config));
 }
 
+function configuredExtensions(values, fallback) {
+  return Array.isArray(values) && values.length ? values : fallback;
+}
+
 function isUserFacing(text) {
   const value = String(text || '').trim();
   if (!value) return false;
@@ -105,7 +109,7 @@ function extractFromCocosPrefab(filePath, config) {
   const out = [];
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
-    if (!item || item.__type__ !== 'cc.Label') continue;
+    if (!item || (item.__type__ !== 'cc.Label' && item.__type__ !== 'cc.RichText')) continue;
     const text = item._string;
     if (!isUserFacing(text)) continue;
     const file = rel(filePath, config);
@@ -115,7 +119,7 @@ function extractFromCocosPrefab(filePath, config) {
       componentId: i,
       text,
       fallbackKey,
-      type: 'cc.Label',
+      type: item.__type__,
     };
     out.push({
       ...textItem,
@@ -129,9 +133,14 @@ function extractFromCocosPrefab(filePath, config) {
 function runExtract(config) {
   const baseline = config.baselineLanguage || 'zh';
   const prefabRoots = configuredRoots(config.prefabRoots, [path.join(config.resourcesRoot, 'perfabs'), path.join(config.resourcesRoot, 'prefabs')], config);
-  const prefabFiles = prefabRoots.flatMap(root => walk(root, file => file.endsWith('.prefab')));
+  const prefabExtensions = configuredExtensions(config.prefabExtensions, ['.prefab']);
+  const sceneRoots = configuredRoots(config.sceneRoots, [], config);
+  const sceneExtensions = configuredExtensions(config.sceneExtensions, ['.scene', '.fire']);
+  const prefabFiles = prefabRoots.flatMap(root => walk(root, file => prefabExtensions.some(ext => file.endsWith(ext))));
+  const sceneFiles = sceneRoots.flatMap(root => walk(root, file => sceneExtensions.some(ext => file.endsWith(ext))));
+  const scannedFiles = [...prefabFiles, ...sceneFiles];
   const items = [];
-  for (const file of prefabFiles) {
+  for (const file of scannedFiles) {
     try {
       items.push(...extractFromCocosPrefab(file, config));
     } catch (error) {
@@ -164,7 +173,7 @@ function runExtract(config) {
     generatedAt: new Date().toISOString(),
     baselineLanguage: baseline,
     summary: {
-      prefabFiles: prefabFiles.length,
+      prefabFiles: scannedFiles.length,
       extractedTexts: Object.keys(locale).length,
       runtimeKeyMappedTexts: coverage.mapped.length,
       runtimeKeyMissingTexts: coverage.missing.length,

@@ -360,6 +360,10 @@ function configuredRoots(values, fallback, config) {
   return roots.map(root => resolveRoot(root, config));
 }
 
+function configuredExtensions(values, fallback) {
+  return Array.isArray(values) && values.length ? values : fallback;
+}
+
 function runAudit(config) {
   const projectRoot = config.projectRoot;
   const resourcesRelPrefix = `${toPosix(path.relative(projectRoot, config.resourcesRoot))}/`;
@@ -370,8 +374,10 @@ function runAudit(config) {
   const spriteFrameMap = parseSpriteFrameMap(config, targetLanguages);
   const prefabRoots = configuredRoots(config.prefabRoots, [path.join(config.resourcesRoot, 'perfabs'), path.join(config.resourcesRoot, 'prefabs')], config);
   const sceneRoots = configuredRoots(config.sceneRoots, [path.join(config.assetsRoot, 'Scene')], config);
-  const prefabFiles = prefabRoots.flatMap(root => walk(root, filePath => filePath.endsWith('.prefab')));
-  const sceneFiles = sceneRoots.flatMap(root => walk(root, filePath => filePath.endsWith('.fire')));
+  const prefabExtensions = configuredExtensions(config.prefabExtensions, ['.prefab']);
+  const sceneExtensions = configuredExtensions(config.sceneExtensions, ['.scene', '.fire']);
+  const prefabFiles = prefabRoots.flatMap(root => walk(root, filePath => prefabExtensions.some(ext => filePath.endsWith(ext))));
+  const sceneFiles = sceneRoots.flatMap(root => walk(root, filePath => sceneExtensions.some(ext => filePath.endsWith(ext))));
   const scannedFiles = [...prefabFiles, ...sceneFiles];
 
   const sprites = [];
