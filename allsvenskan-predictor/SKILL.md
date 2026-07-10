@@ -7,7 +7,7 @@ description: Predict and analyze Swedish Allsvenskan (and other domestic league)
 
 ## Overview
 
-Predict domestic league football matches using the same 5-agent swarm methodology as worldcup-predictor, but **adapted for league-specific dynamics**: home advantage, fixture congestion, relegation/title race pressure, and 38-round mean reversion instead of single-elimination chaos.
+Predict domestic league football matches using the same 6-agent swarm methodology as worldcup-predictor, but **adapted for league-specific dynamics**: home advantage, fixture congestion, relegation/title race pressure, and 38-round mean reversion instead of single-elimination chaos.
 
 Core difference from worldcup-predictor:
 - **No knockout psychology** (house-money, must-win-or-out, extra time)
@@ -70,7 +70,7 @@ Same core methodology as worldcup-predictor, but **briefed for league context**.
 **NEW: odds-analyst workflow**:
 - Uses **Tavily search** to find odds: `"[Home] vs [Away] odds Pinnacle Bet365 Oddsportal [date]"`
 - Converts to implied probability and removes vig
-- Compares market consensus with other 5 agents' predictions → detects value bets
+- Compares market consensus with other 5 core agents' predictions → detects value bets
 - Flags anomalies (dual-odds conflicts, trap odds, suspicious movements)
 
 Spawn all **6 agents in parallel** (single message, multiple Agent tool calls). Each returns structured Markdown (see `references/personas-league.md`).
@@ -82,7 +82,7 @@ Reconcile the **6 reports** and apply **league-proven rules** + **odds calibrati
 #### ⚠️ Odds Calibration Check (MANDATORY with odds-analyst)
 
 Before finalizing prediction:
-1. **Compare market consensus (odds-analyst) with model consensus (other 5 agents)**:
+1. **Compare market consensus (odds-analyst) with model consensus (other 5 core agents)**:
    - If difference <5%: High confidence, market agrees with our model
    - If difference 5-15%: Moderate confidence, investigate gap (did we miss injury? Is market overreacting?)
    - If difference >15%: **RED FLAG** 🚩 — either we missed critical info, or there's value bet opportunity
