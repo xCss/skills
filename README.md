@@ -9,6 +9,8 @@ Reusable agent skills with stable CLI entry points. Each skill keeps decision-ma
 | `i18n-workflow` | Game localization audits, runtime i18n checks, localized text-image generation, review sheets | `node scripts/i18n-workflow-cli.cjs` |
 | `imagegen-workflow` | Repeatable image generation/editing, text-image replacement, PNG postprocessing, provider readiness checks | `uv run python scripts/imagegen_workflow_cli.py` |
 | `bilibili-publishing-workflows` | Bilibili metadata/comment extraction and legacy-style poster or HTML generation | `uv run python scripts/bilibili_publish_cli.py` |
+| `worldcup-predictor` | Football match predictions, win probabilities, daily prediction reports, accuracy tracking (6-agent swarm) | prompt-driven (no CLI) |
+| `allsvenskan-predictor` | Allsvenskan match predictions (league variant of the same 6-agent swarm) | prompt-driven (no CLI) |
 
 ## Repository conventions
 
