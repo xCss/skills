@@ -1,9 +1,9 @@
 ---
 name: allsvenskan-predictor
-description: Predict and analyze Swedish Allsvenskan (and other domestic league) match results using a swarm of 5 independent sub-agents. Optimized for league format (38-round home/away, no knockout pressure). Use when the user wants Swedish league predictions, fixture analysis, or tracking prediction accuracy over the season.
+description: Predict and analyze Swedish Allsvenskan (and other domestic league) match results using a swarm of 6 independent sub-agents. Optimized for league format (38-round home/away, no knockout pressure). Use when the user wants Swedish league predictions, fixture analysis, or tracking prediction accuracy over the season.
 ---
 
-# Allsvenskan Predictor (5-Agent Swarm for Domestic Leagues)
+# Allsvenskan Predictor (6-Agent Swarm for Domestic Leagues)
 
 ## Overview
 
@@ -27,11 +27,20 @@ Works for any domestic league: Premier League, La Liga, Serie A, Bundesliga, Lig
 
 ## Workflow
 
+### Phase 0 — Live-verify (mandatory, Lesson 36)
+
+**Before writing any facts.md, live-verify every fact against the open web — never author from memory or the internal ledger.**
+
+Run web searches to confirm every fact each run — real scores, kickoff time, venue, and current squad/injury/suspension status. Do NOT assume the fixtures are unavailable online and fill facts.md from memory or `ledger.md`.
+
+**ledger.md authority boundary:** The internal `ledger.md` is authoritative ONLY for our own past predictions vs outcomes — never for a team's current form, standings, injuries, or lineup.
+
+If a live search genuinely returns nothing, say so and mark that fact `⚠️ UNVERIFIED` rather than guessing.
+
 ### Phase 1 — Establish ground truth (fact-check)
 
-Before any prediction, build a verified fact sheet:
+After live-verifying (Phase 0), build a verified fact sheet:
 
-0. **Live-verify against the open web FIRST — never write facts.md from memory or the internal ledger (mandatory)**: Run web searches to confirm every fact each run — real scores, kickoff time, venue, and current squad/injury/suspension status. Do NOT assume the fixtures are unavailable online and fill facts.md from memory or `ledger.md`. The internal `ledger.md` is authoritative ONLY for our own past predictions vs outcomes — never for a team's current form, standings, injuries, or lineup. If a live search genuinely returns nothing, say so and mark that fact `⚠️ UNVERIFIED` rather than guessing.
 1. **Fixtures**: Use Flashscore, official league site, or ESPN domestic fixtures. Convert kickoff times to user timezone (default: CET for Swedish leagues).
 2. **For finished matches**: Record actual scores from the same source.
 3. **Standings (MANDATORY)**: For every team, record:
@@ -100,6 +109,21 @@ Before finalizing prediction:
 **Final prediction** = weighted synthesis:
 - If odds-analyst + 4 other agents agree (within 5%) → **High confidence**
 - If odds-analyst conflicts with others → **Lower confidence, investigate, trust market if no explanation found**
+
+#### 📋 worldcup-predictor Lessons Applicability
+
+From the 17 mandatory lessons in `worldcup-predictor/references/lessons.md`, the following **DO apply** to domestic leagues:
+- **L6-9 (Type-A/B classification, teeth gates, penalty toss-up):** Clean-sheet default, toothless vs resilient opponents, shootout randomness — all transfer to leagues.
+- **L11 (S-tier star tiering):** World-class players (Haaland/Salah tier) can swing league matches just as they do knockouts.
+- **L15-16 (hard/soft teeth gates):** Whether an underdog's attacking threat is real (proven vs strong opponents, world-class forward healthy) vs fake (padded vs weak teams, key player out) applies universally.
+
+The following **DO NOT apply** (knockout-specific):
+- **L1-5 (altitude, must-win asymmetry, heat, rotation in group stage):** Leagues don't have altitude venues (Sweden is flat), no group-stage "already qualified" scenarios, no single-elimination pressure.
+- **L10-11 (knockout psychological burden, house-money):** Leagues have relegation/title pressure instead (see Core League Rules below).
+- **L12 (altitude two-tier gate):** Not applicable (no altitude).
+- **L13-14 (sample context for favorites/underdogs in tournaments):** League form is 38-round cumulative, not 3-game group stage samples.
+
+**Use the applicable worldcup lessons (L6-9, L11, L15-16) in conjunction with the Core League Rules below.**
 
 #### ⭐ Core League Rules (mandatory checks)
 

@@ -22,6 +22,25 @@ Each sub-agent returns Markdown with this structure. Save each as `workspace/<da
 ## <next match> ...
 ```
 
+**Odds-analyst-specific output (6th agent):**
+
+```markdown
+# odds-analyst — <date>
+
+## <Home> vs <Away> (<kickoff in user tz>, <venue>)
+- **Market consensus:** <e.g. "Home -150 (60% implied), Draw +250 (28%), Away +425 (19%)">
+- **Vig-adjusted probabilities:** <e.g. "Home 57%, Draw 26%, Away 17%">
+- **Recommended direction:** <Home / Draw / Away, based on market>
+- **Value detection:** <"None" OR "Away underpriced at +425, model consensus 25%" OR "Draw overpriced">
+- **Cross-validation with model:** <Compare with other 5 agents' verdicts — do they align or diverge?>
+- **Red flags:** <"Dual-odds conflict Pinnacle vs Bet365" OR "Sudden 20% odds shift in 24h" OR "None">
+- **Sources:**
+  - Market odds — <Pinnacle / Bet365 / Oddsportal link from Tavily search>
+  - <Any breaking news that explains odds movement> — <link>
+
+## <next match> ...
+```
+
 Rules for every agent:
 - One block per match in the verified slate. Predict only matches present in `facts.md`.
 - Every factual claim carries a source link. Drop unsourced claims.
@@ -33,20 +52,20 @@ Rules for every agent:
 ### Layer 1 — Summary table (one row per match)
 
 ```markdown
-| Match | data | tactics | injury | buzz | risk | Synthesized pick | Confidence |
-|---|---|---|---|---|---|---|---|
-| ESP vs GER | ESP | ESP | even | GER hype | DRAW likely | ESP narrow | medium |
+| Match | data | tactics | injury | buzz | risk | odds | Synthesized pick | Confidence |
+|---|---|---|---|---|---|---|---|---|
+| ESP vs GER | ESP | ESP | even | GER hype | DRAW likely | ESP -150 | ESP narrow | medium |
 ```
 
 Each cell = that agent's one-line verdict. Last two columns = your reconciled pick + honest confidence band.
 
 ### Layer 2 — Deep archive
 
-Keep all 5 per-agent `.md` files under `workspace/<date>/`. Link them from the summary so the reasoning + sources are auditable.
+Keep all 6 per-agent `.md` files under `workspace/<date>/`. Link them from the summary so the reasoning + sources are auditable.
 
 ### Confidence logic
 
-- 4 forecasters agree + risk-officer's upset case is weak → **high**.
+- 5 forecasters agree + risk-officer's upset case is weak → **high**.
 - Split forecasters, OR risk-officer makes a strong upset case → **low / volatile** (flag it; don't hide it).
 - Otherwise → **medium**.
 
