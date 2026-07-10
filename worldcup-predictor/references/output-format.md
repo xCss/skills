@@ -1,5 +1,11 @@
 # Output Formats
 
+**Language rule (applies to all output):** Use **consistent language throughout** — either all English or all Chinese, not mixed. Choose one:
+- **English**: Full English for all headers, labels, narrative, and technical terms. Use this when the user prefers English output.
+- **Chinese**: Full Chinese for headers, labels, and narrative. Technical terms (agent names, Lesson numbers, player/venue names, betting terms like BTTS/xG) may remain in English if they're widely recognized without translation. Example: "数据分析师 (data-analyst) 预测西班牙晋级 72%，基于 xG 和 Lesson 31 S档判定" is acceptable; "Predicted 西班牙 win with 置信度 medium based on BTTS Yes -136" is not.
+
+Historical workspace files (pre-2026-07-12) predate this rule and may mix languages — leave them as-is.
+
 **Output encoding rule (applies to every agent):** Return plain Markdown body text only. Do NOT wrap the response in JSON, tool calls, structured objects, or any other container format. The raw Markdown string itself is the return value. If the harness shows a "parse error" or empty result, the most likely cause is the agent wrapping output in a non-Markdown format — the retry in Phase 2 should send the same prompt with this constraint explicitly restated.
 
 ## Per-agent report (Phase 2)

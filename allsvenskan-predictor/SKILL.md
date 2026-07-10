@@ -84,6 +84,10 @@ Same core methodology as worldcup-predictor, but **briefed for league context**.
 
 Spawn all **6 agents in parallel** (single message, multiple Agent tool calls). Each returns structured Markdown (see `references/personas-league.md`).
 
+**Language rule (applies to all output):** Use **consistent language throughout** — either all English or all Chinese, not mixed. Choose one:
+- **English**: Full English for all headers, labels, narrative, and technical terms.
+- **Chinese**: Full Chinese for headers, labels, and narrative. Technical terms (agent names, Lesson numbers, player/venue names, betting terms like BTTS/xG/Poisson) may remain in English if they're widely recognized. Example: "数据分析师预测主队胜率 65%，基于 xG 和主场优势" is acceptable; "Predicted 主队 win with 置信度 medium based on xG 1.8" is not.
+
 ### Phase 3 — Synthesize & cross-validate with odds
 
 Reconcile the **6 reports** and apply **league-proven rules** + **odds calibration**:
