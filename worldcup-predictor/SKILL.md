@@ -30,6 +30,7 @@ Run these phases in order. Do not skip Phase 1.
 
 Before any prediction, build a verified fact sheet for the day's slate:
 
+0. **Live-verify against the open web FIRST — never write facts.md from memory, ledger, or an assumed "simulated fixture" (mandatory, Lesson 36):** Real tournaments (World Cup 2026, Euros, leagues) are fully reported online. Before recording ANY fact, run web searches to confirm it: real scores, kickoff time, **exact venue**, and — critically — **squad/lineup status** (who is injured, suspended, or *not in the squad at all*). Do NOT open facts.md with a disclaimer like "this is a simulated bracket, the public web has no scores" and then fill it from the internal ledger + memory — that is precisely how the 07-10 France-Morocco facts shipped THREE wrong data points (Mbappé listed at 18 goals vs the real 19; En-Nesyri assumed a starter when he was **uncalled** for the squad; Saibari's hamstring injury missed entirely; venue left "TBD" when it was Foxborough), forcing a whole `-updated` re-run after the fact. The internal `ledger.md` is authoritative ONLY for *our own past predictions vs outcomes*; it is NOT a source for a team's current squad, form, injuries, or a player's live tournament tally — those MUST come from a live web search every run. If a genuine web search truly returns nothing for a fixture (rare), say so explicitly and mark each such fact `⚠️ UNVERIFIED` rather than presenting a guess as ground truth.
 1. Identify the real fixtures for the target date. Use an authoritative schedule source (e.g. ESPN fixtures/results page, the official tournament site). Convert all kickoff times to the user's timezone (default: ask, or use Beijing time as in the source method).
 2. For matches already played, record the **actual** final scores from the same source.
 3. Capture context that feeds prediction: venue, attendance if available, and confirmed injuries/suspensions.
@@ -140,7 +141,7 @@ For a daily report (as in the source method, "8am every morning"), offer to set 
 
 ## Guardrails
 
-- **Verify before predict.** No fixture in `facts.md` = no prediction. State exclusions.
+- **Verify before predict.** No fixture in `facts.md` = no prediction. State exclusions. **Live-verify every fact against the open web each run (Phase 1 step 0) — never author facts.md from memory or the internal ledger, and never assume the fixtures are "simulated / not online." `ledger.md` is authoritative only for our own past prediction accuracy, not for current squads, form, injuries, or a player's live goal tally.**
 - **Sources, always.** Every agent conclusion carries a link. Unsourced claims get dropped, especially injuries.
 - **Don't fake independence.** Real value comes from agents NOT seeing each other. Never collapse them into one prompt that role-plays five voices — spawn five actual sub-agents.
 - **Honest uncertainty.** Predictions are probabilistic. Report confidence honestly; let the risk-officer puncture overconfidence. This is analysis/entertainment, not betting advice — don't present it as a guaranteed outcome.

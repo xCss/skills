@@ -31,6 +31,7 @@ Works for any domestic league: Premier League, La Liga, Serie A, Bundesliga, Lig
 
 Before any prediction, build a verified fact sheet:
 
+0. **Live-verify against the open web FIRST — never write facts.md from memory or the internal ledger (mandatory)**: Run web searches to confirm every fact each run — real scores, kickoff time, venue, and current squad/injury/suspension status. Do NOT assume the fixtures are unavailable online and fill facts.md from memory or `ledger.md`. The internal `ledger.md` is authoritative ONLY for our own past predictions vs outcomes — never for a team's current form, standings, injuries, or lineup. If a live search genuinely returns nothing, say so and mark that fact `⚠️ UNVERIFIED` rather than guessing.
 1. **Fixtures**: Use Flashscore, official league site, or ESPN domestic fixtures. Convert kickoff times to user timezone (default: CET for Swedish leagues).
 2. **For finished matches**: Record actual scores from the same source.
 3. **Standings (MANDATORY)**: For every team, record:
@@ -180,7 +181,7 @@ After matches finish:
 
 ## Guardrails
 
-- **Verify before predict**: No fixture in facts.md = no prediction
+- **Verify before predict**: No fixture in facts.md = no prediction. Live-verify every fact against the open web each run (Phase 1 step 0) — never author facts.md from memory or the internal ledger.
 - **Sources always**: Every claim needs a link
 - **Home/away splits mandatory**: Season averages mislead in leagues
 - **Honest uncertainty**: Leagues have more draws (~25-30%) than knockout football
