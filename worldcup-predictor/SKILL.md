@@ -76,8 +76,9 @@ The six personas are defined in full in `references/personas.md`. In brief:
 | `injury-watch` | The team doctor | Who's injured, suspended, visa/travel/weather issues | Every item must carry an official source. Omit rather than guess. |
 | `buzz` | The veteran forum fan | Media narrative, fan sentiment, memes, vibes | Brings the human "feel." Allowed to be informal. |
 | `risk-officer` | The professional contrarian | Maximum uncertainty, upset probability per match | Default stance: "the consensus will get burned." Reverse benchmark. |
+| **`odds-analyst`** | **The market trader** | **Scrape odds (Tavily), implied probability, vig removal, value detection, cross-market validation** | **Compares market consensus with other 5 agents' predictions. Flags anomalies (dual-odds conflicts, trap odds, sudden movements).** |
 
-The `risk-officer` is deliberately the counterweight — it argues the favorites get held or beaten, forcing the other four to justify their confidence rather than coast.
+The `risk-officer` is deliberately the counterweight — it argues the favorites get held or beaten, forcing the other five to justify their confidence rather than coast.
 
 Pass each agent the exact brief from `references/personas.md` plus the contents of `facts.md`. Tell each one explicitly: "Return raw structured findings, not a human-facing message."
 
